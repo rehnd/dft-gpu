@@ -1,31 +1,32 @@
-#ifndef INDG_HPP
-#define INDG_HPP
+#ifndef ARRAY3D_HPP
+#define ARRAY3D_HPP
 
 #include <stdio.h>
 
-class IndG
+
+class Array3d
 {
   /* This class accesses, for each set of Miller Indices (i, j, k),
      the corresponding value of m in $\vec G_m$, so that one can find
      a particular G vector from the Miller Indices. */
 private:
   int _x, _y, _z; // Array runs from [-_x, _x], [-_y, _y], and [-_z, _z]
-  int _xl, _yl, _zl;
   int _size;
   double *a;
 
 public:
-  IndG(int x, int y, int z)
+  Array3d(int x, int y, int z, double value)
   {
     _x = x; _y = y; _z = z;
-    _xl = 2*_x + 1;  _yl = 2*_y + 1;  _zl = 2*_z + 1;
-    _size = _xl*_yl*_zl;
-    printf("size = %d\n", _size);
+    _size = _x*_y*_z;
     a = (double*)malloc(_size*sizeof(double));
+
+    for (int i = 0; i < _size; i++)
+      a[i] = value;
   }
   double& operator() (int i, int j, int k)
   {
-    int index = i + _x + (j + _y)*_xl + (k + _z)*_xl*_yl;
+    int index = i + j*_xl + k*_xl*_yl;
     if (index < _size && index >= 0)
       return a[index];
     else
@@ -36,7 +37,7 @@ public:
   }
   const double& operator() (int i, int j, int k) const
   {
-    int index = i + _x + (j + _y)*_xl + (k + _z)*_xl*_yl;
+    int index = i + j*_xl + k*_xl*_yl;
     if (index < _size && index >= 0)
       return a[index];
     else
@@ -45,10 +46,10 @@ public:
       exit(1);
     }
   }
-  ~IndG()
+  ~Array3d()
   {
     free(a);
   }
 };
 
-#endif /* INDG_HPP */
+#endif /* ARRAY_3D */
