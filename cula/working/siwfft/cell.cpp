@@ -387,7 +387,6 @@ void cell::_sumCharge(int k)
 {
   int memsize = sizeof(cufftDoubleComplex)*_nr0*_nr1*_nr2;
   cufftDoubleComplex* h_aux = (cufftDoubleComplex*)malloc(memsize);
-  // h_aux.resize(_nr0*_nr1*_nr2);
   cufftDoubleComplex *d_aux;
   cufftHandle plan;
   cufftType CUFFT_C2C;

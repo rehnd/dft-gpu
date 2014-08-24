@@ -6,9 +6,9 @@
 
 class Array3d
 {
-  /* This class accesses, for each set of Miller Indices (i, j, k),
-     the corresponding value of m in $\vec G_m$, so that one can find
-     a particular G vector from the Miller Indices. */
+  /* This class provides an interface to a 1D static array so that
+   * array accesses can be handled like 3D array accesses. This differs 
+   * from IndG in that the x,y,z components are 0-based indexing. */
 private:
   int _x, _y, _z; // Array runs from [-_x, _x], [-_y, _y], and [-_z, _z]
   int _size;
