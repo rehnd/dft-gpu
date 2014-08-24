@@ -12,7 +12,7 @@ private:
   int _x, _y, _z; // Array runs from [-_x, _x], [-_y, _y], and [-_z, _z]
   int _xl, _yl, _zl;
   int _size;
-  double *a;
+  int *a;
 
 public:
   IndG(int x, int y, int z)
@@ -21,9 +21,9 @@ public:
     _xl = 2*_x + 1;  _yl = 2*_y + 1;  _zl = 2*_z + 1;
     _size = _xl*_yl*_zl;
     printf("size = %d\n", _size);
-    a = (double*)malloc(_size*sizeof(double));
+    a = (int*)malloc(_size*sizeof(int));
   }
-  double& operator() (int i, int j, int k)
+  int& operator() (int i, int j, int k)
   {
     int index = i + _x + (j + _y)*_xl + (k + _z)*_xl*_yl;
     if (index < _size && index >= 0)
@@ -34,7 +34,7 @@ public:
       exit(1);
     }
   }
-  const double& operator() (int i, int j, int k) const
+  const int& operator() (int i, int j, int k) const
   {
     int index = i + _x + (j + _y)*_xl + (k + _z)*_xl*_yl;
     if (index < _size && index >= 0)
