@@ -7,12 +7,12 @@
 #include <sstream>
 #include <map>
 #include <complex>
+#include <sys/time.h>
 
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/LU>
-#include <sys/time.h>
 
 #include <cula.h>
 #include <cula_lapack.h>
@@ -25,52 +25,57 @@
 using namespace Eigen;
 using std::string;
 
-void print_matrix( char* desc, int m, int n, double* a, int lda ) {
+
+void print_matrix( char* desc, int m, int n, double* a, int lda )
+{
   int i, j;
   printf("\n%s: \n", desc);
-  for( i = 0; i < m; i++ ) {
+  for( i = 0; i < m; i++ )
+  {
     for( j = 0; j < n; j++ ) printf( " %6.2f", a[i+j*lda] );
     printf( "\n" );
   }
 }
 
 
-// set up computational cell with constructor
 cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latconst)
 {
-  _nk = 1;
+  _nk = 1; // Number of k points to be used
   _k.resize(3, _nk);
-  _npw_perk.resize(_nk);
-  _wk.resize(1,1);
+  _npw_perk.resize(_nk); // Number of plane waves per k point
+  _wk.resize(1,1); // Weights of each k point
 
   double _tau1 = 0.125, _tau2 = 0.125, _tau3 = 0.125;
 
-  // define lattice vectors
+  // Define lattice vectors
   _a1 << 0.5*latconst, 0.5*latconst, 0;
   _a2 << 0, 0.5*latconst, 0.5*latconst;
   _a3 << 0.5*latconst, 0, 0.5*latconst;
 
-  // compute reciprocal lattice vectors
-  _vol = _a1.dot(_a2.cross(_a3));
+  // Compute reciprocal lattice vectors
+  _vol = std::abs(_a1.dot(_a2.cross(_a3))); // _vol is likely < 0 -> use abs()
+  printf("vol = %g\n", _vol);
   _b1 = (2*M_PI/_vol)*_a2.cross(_a3);
   _b2 = (2*M_PI/_vol)*_a3.cross(_a1);
   _b3 = (2*M_PI/_vol)*_a1.cross(_a2);
 
-  // timer variables
-
-  _k(0,0) = 0.6223; _k(1,0) = 0.2953; _k(2,0) = 0.0;
+  // k point used is a mean-value point
+  _k(0,0) = 2*M_PI*0.6223/_latconst; 
+  _k(1,0) = 2*M_PI*0.2953/_latconst;
+  _k(2,0) = 0.0;
 
   _get_plane_waves();
-  _G = Map<MatrixXd>(_G.data(),3,_npw);  /// !!!!!!! Very careful here! not sure what this does.
+  _G = Map<MatrixXd>(_G.data(),3,_npw);  // Remap this to a 3 x _npw matrix
 
   _get_SG();
   _count_nk();
-
 }
 
 
 std::string miller(int i0, int i1, int i2)
 {
+  /* For lack of better design, store Miller indices in a map
+     with key as a string representing the three miller indices */ 
   std::stringstream ss;
   ss << i0 << " " << i1 << " " << i2;
   return ss.str();
@@ -90,10 +95,13 @@ void cell::_get_plane_waves()
 
   int npw = 0;
 
-  for (int i=-max; i<=max; i++) {
-    for (int j=-max; j<=max; j++) {
-      for (int k=-max; k<=max; k++) {
-
+  // Calculate max # of plane waves based on E_{cut}
+  for (int i=-max; i<=max; i++)
+  {
+    for (int j=-max; j<=max; j++)
+    {
+      for (int k=-max; k<=max; k++)
+      {
 	Vector3d pw = i*_b1 + j*_b2 + k*_b3;
 	double G_G = pw.squaredNorm()/2;
 
@@ -107,14 +115,17 @@ void cell::_get_plane_waves()
   _mill.resize(3,npw);
 
   int ng = 0;
-  for (int i = -max; i <= max; i++) {
-    for (int j = -max; j <= max; j++) {
-      for (int k = -max; k <= max; k++) {
-
+  for (int i = -max; i <= max; i++)
+  {
+    for (int j = -max; j <= max; j++)
+    {
+      for (int k = -max; k <= max; k++)
+      {
 	Vector3d pw = i*_b1 + j*_b2 + k*_b3;
 	double G_G = pw.squaredNorm()/2;
 
-	if (G_G < _ecut) {
+	if (G_G < _ecut)
+	{
 	  _G.col(ng) << pw;
 	  _G2[ng] = G_G;
 	  _mill.col(ng) << i, j, k;
@@ -129,19 +140,20 @@ void cell::_get_plane_waves()
     printf("Error in _get_plane_waves: ng != npw\n");
     exit(1);
   }
-  _npw = npw;
-  std::cout << "Num plane waves: " << _npw << std::endl;
 
-  // Now fill Miller Indices into indg
+  _npw = npw;
+  printf("Num plane waves: %d\n", _npw);
+
+  // Fill Miller Indices into indg:
   _nm0 = _G.rowwise().maxCoeff()(0);
   _nm1 = _G.rowwise().maxCoeff()(1);
   _nm2 = _G.rowwise().maxCoeff()(2);
-
   for (int i = 0; i < _npw; i++)
   {
     string str = miller( _mill(0,i), _mill(1,i), _mill(2,i) );
     _indg[str] = i;
   }
+
   // While we're here, set the Real-Space grid dimensions:
   _nr0 = 2 * _nm0 + 2;
   _nr1 = 2 * _nm1 + 2;
@@ -150,7 +162,7 @@ void cell::_get_plane_waves()
   // Timing:
   gettimeofday(&end, NULL);
   dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-  std::cout << "Time (sec) for _get_plane_waves: " << dt << std::endl;
+  printf("Time (sec) for _get_plane_waves: %g\n", dt);
 }
 
 
@@ -334,7 +346,7 @@ double cell::_diagH(int k)
 
   // printf("Eigenvalues:   ");
   // for (int i = 0; i < _eigvals.size(); i++)
-  //   std::cout << _eigvals[i] << " ";
+  //   printf("%g ", _eigvals[i]);
   // printf("      ");
 
   return dt;
@@ -373,19 +385,15 @@ void cell::_calcRho(int k)
 
 void cell::_sumCharge(int k)
 {
-
   int memsize = sizeof(cufftDoubleComplex)*_nr0*_nr1*_nr2;
   cufftDoubleComplex* h_aux = (cufftDoubleComplex*)malloc(memsize);
   // h_aux.resize(_nr0*_nr1*_nr2);
-  printf("Made it\n");
   cufftDoubleComplex *d_aux;
   cufftHandle plan;
   cufftType CUFFT_C2C;
   int nrank = 3;
 
   int npw = _npw_perk[k];
-
-  printf("Made it\n");
 
   for (int nb = 0; nb < _nbands; nb++)
   {
@@ -424,7 +432,6 @@ void cell::_sumCharge(int k)
       }
     }
     
-    printf("Made it\n");
     cudaMalloc((void**)&d_aux, memsize);
     if (cudaGetLastError() != cudaSuccess)
     {
@@ -459,12 +466,9 @@ void cell::_sumCharge(int k)
       // Factor of 2 for spin degeneracy. 1/_vol comes from def of plane waves
       _rhoout[i] += 2*_wk[k]*std::abs(pow(h_aux[i].x, 2) + pow(h_aux[i].y, 2))/_vol;
     }
-
   }
-
   cufftDestroy(plan);
   cudaFree(d_aux);
-
 }
 
 
@@ -497,20 +501,20 @@ void cell::_scf(void)
       _fillH(k);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      std::cout << "Time (sec) for _fillH: " << dt1 << std::endl;
+      printf("Time (sec) for _fillH: %g\n", dt1);
 
       gettimeofday(&start1, NULL);
       double dt = _diagH(k);
       // printf("Iteration %d, Diagonalization time = %g sec      ", iter, dt);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      std::cout << "Time (sec) for _diagH: " << dt1 << std::endl;
+      printf("Time (sec) for _diagH: %g\n", dt1);
 
       gettimeofday(&start1, NULL);
       _sumCharge(k);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      std::cout << "Time (sec) for _calcRho: " << dt1 << std::endl;
+      printf("Time (sec) for _calcRho: %g\n", dt1);
     }
 
     struct timeval start1, end1; double dt1; gettimeofday(&start1, NULL);
@@ -552,9 +556,7 @@ void cell::_scf(void)
     gettimeofday(&end1, NULL);
     dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
     std::cout << "Time (sec) for all charge mixing stuff: " << dt1 << std::endl;
-
   }
-
 
   // Timing:
   gettimeofday(&end, NULL);
