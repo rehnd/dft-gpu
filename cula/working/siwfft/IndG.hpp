@@ -15,12 +15,20 @@ private:
   int *a;
 
 public:
+  IndG() { }
   IndG(int x, int y, int z)
   {
     _x = x; _y = y; _z = z;
     _xl = 2*_x + 1;  _yl = 2*_y + 1;  _zl = 2*_z + 1;
     _size = _xl*_yl*_zl;
     printf("size = %d\n", _size);
+    a = (int*)malloc(_size*sizeof(int));
+  }
+  void Initialize(int x, int y, int z)
+  {
+    _x = x; _y = y; _z = z;
+    _xl = 2*_x + 1;  _yl = 2*_y + 1;  _zl = 2*_z + 1;
+    _size = _xl*_yl*_zl;
     a = (int*)malloc(_size*sizeof(int));
   }
   int& operator() (int i, int j, int k)

@@ -21,21 +21,12 @@
 #include <cufft.h>
 
 #include "cell.hpp"
+#include "Array3d.hpp"
+#include "IndG.hpp"
+#include "tools.hpp"
 
 using namespace Eigen;
 using std::string;
-
-
-void print_matrix( char* desc, int m, int n, double* a, int lda )
-{
-  int i, j;
-  printf("\n%s: \n", desc);
-  for( i = 0; i < m; i++ )
-  {
-    for( j = 0; j < n; j++ ) printf( " %6.2f", a[i+j*lda] );
-    printf( "\n" );
-  }
-}
 
 
 cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latconst)
@@ -43,9 +34,14 @@ cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latcon
   _nk = 1; // Number of k points to be used
   _k.resize(3, _nk);
   _npw_perk.resize(_nk); // Number of plane waves per k point
-  _wk.resize(1,1); // Weights of each k point
+  _wk.resize(1,1); // Weights of each k point (initialize to 1)
 
-  double _tau1 = 0.125, _tau2 = 0.125, _tau3 = 0.125;
+  /* Below: Components of $\tau$ vector. Note: for now, leaving out
+     a_0 which should multiply each component. This, along with
+     computation of the structure factor is very contrived for now -
+     basically following a code until I can find a better description
+     of calculating S(G) */
+  _tau0 = 0.125; _tau1 = 0.125; _tau2 = 0.125; 
 
   // Define lattice vectors
   _a1 << 0.5*latconst, 0.5*latconst, 0;
@@ -53,8 +49,7 @@ cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latcon
   _a3 << 0.5*latconst, 0, 0.5*latconst;
 
   // Compute reciprocal lattice vectors
-  _vol = std::abs(_a1.dot(_a2.cross(_a3))); // _vol is likely < 0 -> use abs()
-  printf("vol = %g\n", _vol);
+  _vol = std::abs(_a1.dot(_a2.cross(_a3))); // _vol < 0 -> use abs()
   _b1 = (2*M_PI/_vol)*_a2.cross(_a3);
   _b2 = (2*M_PI/_vol)*_a3.cross(_a1);
   _b3 = (2*M_PI/_vol)*_a1.cross(_a2);
@@ -65,20 +60,10 @@ cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latcon
   _k(2,0) = 0.0;
 
   _get_plane_waves();
-  _G = Map<MatrixXd>(_G.data(),3,_npw);  // Remap this to a 3 x _npw matrix
+  // _G = Map<MatrixXd>(_G.data(),3,_npw);  // Remap this to a 3 x _npw matrix
 
   _get_SG();
   _count_nk();
-}
-
-
-std::string miller(int i0, int i1, int i2)
-{
-  /* For lack of better design, store Miller indices in a map
-     with key as a string representing the three miller indices */ 
-  std::stringstream ss;
-  ss << i0 << " " << i1 << " " << i2;
-  return ss.str();
 }
 
 
@@ -87,25 +72,22 @@ void cell::_get_plane_waves()
   // Timing:
   struct timeval start, end;   double dt;   gettimeofday(&start, NULL);
 
-  std::vector<int> maxceil;
-  maxceil.push_back(ceil(sqrt(_ecut)*sqrt(2)/_b1.norm()));
-  maxceil.push_back(ceil(sqrt(_ecut)*sqrt(2)/_b2.norm()));
-  maxceil.push_back(ceil(sqrt(_ecut)*sqrt(2)/_b3.norm()));
-  int max = *(std::max_element(maxceil.begin(), maxceil.end()));
+  _nm0 = (int) round(sqrt( 4.*_ecut )/ (2*M_PI) *  sqrt(_a1.squaredNorm()) + 0.5);
+  _nm1 = (int) round(sqrt( 4.*_ecut )/ (2*M_PI) *  sqrt(_a2.squaredNorm()) + 0.5);
+  _nm2 = (int) round(sqrt( 4.*_ecut )/ (2*M_PI) *  sqrt(_a3.squaredNorm()) + 0.5);
 
   int npw = 0;
-
   // Calculate max # of plane waves based on E_{cut}
-  for (int i=-max; i<=max; i++)
+  for (int i = -_nm0; i <= _nm0; i++)
   {
-    for (int j=-max; j<=max; j++)
+    for (int j = -_nm1; j <= _nm1; j++)
     {
-      for (int k=-max; k<=max; k++)
+      for (int k = -_nm2; k <= _nm2; k++)
       {
 	Vector3d pw = i*_b1 + j*_b2 + k*_b3;
-	double G_G = pw.squaredNorm()/2;
+	double G_G = pw.squaredNorm();
 
-	if (G_G < _ecut)   npw++;
+	if (G_G <= 4.*_ecut)   npw++;
       }
     }
   }
@@ -115,18 +97,18 @@ void cell::_get_plane_waves()
   _mill.resize(3,npw);
 
   int ng = 0;
-  for (int i = -max; i <= max; i++)
+  for (int i = -_nm0; i <= _nm0; i++)
   {
-    for (int j = -max; j <= max; j++)
+    for (int j = -_nm1; j <= _nm1; j++)
     {
-      for (int k = -max; k <= max; k++)
+      for (int k = -_nm2; k <= _nm2; k++)
       {
 	Vector3d pw = i*_b1 + j*_b2 + k*_b3;
-	double G_G = pw.squaredNorm()/2;
+	double G_G = pw.squaredNorm();
 
-	if (G_G < _ecut)
+	if (G_G <= 4.*_ecut)
 	{
-	  _G.col(ng) << pw;
+	  _G(0, ng) = pw(0); _G(1,ng) = pw(1); _G(2,ng) = pw(2);
 	  _G2[ng] = G_G;
 	  _mill.col(ng) << i, j, k;
 	  ng++;
@@ -142,22 +124,27 @@ void cell::_get_plane_waves()
   }
 
   _npw = npw;
-  printf("Num plane waves: %d\n", _npw);
+  printf("Number of plane waves: %d\n", _npw);
 
   // Fill Miller Indices into indg:
-  _nm0 = _G.rowwise().maxCoeff()(0);
-  _nm1 = _G.rowwise().maxCoeff()(1);
-  _nm2 = _G.rowwise().maxCoeff()(2);
+  _nm0 = _mill.rowwise().maxCoeff()(0);
+  _nm1 = _mill.rowwise().maxCoeff()(1);
+  _nm2 = _mill.rowwise().maxCoeff()(2);
+  // _indg.Initialize(_nm0, _nm1, _nm2);
+
   for (int i = 0; i < _npw; i++)
   {
     string str = miller( _mill(0,i), _mill(1,i), _mill(2,i) );
     _indg[str] = i;
+    // _indg(_mill(0,i), _mill(1,i), _mill(2,i)) = i;
   }
 
   // While we're here, set the Real-Space grid dimensions:
   _nr0 = 2 * _nm0 + 2;
   _nr1 = 2 * _nm1 + 2;
   _nr2 = 2 * _nm2 + 2;
+
+  printf("Real-space grid dimensions n_x, n_y, n_z = %d, %d, %d\n\n", _nr0, _nr1, _nr2);
 
   // Timing:
   gettimeofday(&end, NULL);
@@ -170,10 +157,18 @@ void cell::_get_SG(void)
 {
   // Calculates the geometrical structure factors S(G)
 
-  _SG.resize(_npw);
+  _SG.resize(_npw, 0);
 
-  for (int i = 0; i < _npw; i++)
-    _SG[i] = 2.0*cos( 2*M_PI*(_G(0,i)*_tau0 + _G(1,i)*_tau1 + _G(2,i)*_tau2) ) / _vol ;
+  for (int i = 0; i < _npw; i++) {
+    // printf ("%12.8f, %12.8f, %12.8f\n",
+    // 	    _G(0,i)/std::abs(_b1(0)) , 
+    // 	    _G(1,i)/std::abs(_b1(0)) , 
+    // 	    _G(2,i)/std::abs(_b1(0)) );
+    _SG[i] = 2.0*cos( 2*M_PI*(_G(0,i)*_tau0/std::abs(_b1(0)) + 
+			      _G(1,i)*_tau1/std::abs(_b1(0)) + 
+			      _G(2,i)*_tau2/std::abs(_b1(0)) )) / _vol ;
+    // printf("SG[%d] = %12.6f\n", i, _SG[i]);
+  }
 }
 
 
@@ -224,7 +219,7 @@ void cell::_count_nk(void)
 
 double cell::_form_factor(double G2)
 {
-  _e2 = 2.;
+  _e2 = 2.; // Conversion factor from Rydberg to Hartree
   _eps = 1.e-8;
   // Pseudopotential (Applebaum-Hamann) parameters:
   double v1 = 3.042, v2 = -1.372, alpha = 0.6102, zv = 4.;
@@ -246,11 +241,11 @@ double cell::_form_factor(double G2)
 
 void cell::_fillH(int k)
 {
-  _H.resize(_npw_perk[k] * _npw_perk[k]);
+  _H.resize(_npw_perk[k] * _npw_perk[k], 0.);
 
   for (int i = 0; i < _npw_perk[k]; i++)
   {
-    int ik = _igk(i, k);
+    int ik = _igk(i, k); // May get more caching if switch i, k
     Vector3d kg = _k.col(k) + _G.col(ik);
 
     for (int j = i; j < _npw_perk[k]; j++)
@@ -263,29 +258,17 @@ void cell::_fillH(int k)
 
       string str = miller(n1,n2,n3);
       int ng = _indg[str];
-
+      //int ng = _indg(n1, n2, n3);
+      
       double vsg = _form_factor( _G2[ng] );
 
       if (i == j)
-	_H[i + j*_npw_perk[k]] = kg.squaredNorm() + vsg * _SG[ng] + _v[ng];
+	_H[i + j*_npw_perk[k]] = kg.squaredNorm() + vsg * _SG[ng] + _vg[ng];
       else
-	_H[i + j*_npw_perk[k]] = vsg * _SG[ng] + _v[ng];
+	_H[i + j*_npw_perk[k]] = vsg * _SG[ng] + _vg[ng];
+      // printf("H(%d,%d) = %g\n", i, j, _H[i+j*_npw_perk[k]]);
     }
   }
-}
-
-
-void checkStatus(culaStatus status)
-{
-  char buf[256];
-  if (!status)
-    return;
-
-  culaGetErrorInfoString(status, culaGetErrorInfo(), buf, sizeof(buf));
-  printf("%s\n", buf);
-
-  culaShutdown();
-  exit(EXIT_FAILURE);
 }
 
 
@@ -303,7 +286,7 @@ double cell::_diagH(int k)
       culaDouble val = (culaDouble)_H[i + npw*j];
       culaH[i + npw*j] = val;
       if (j == i)
-	culaH[i + npw*i] -= 10000;
+      	culaH[i + npw*i] -= 10000;
     }
   }
 
@@ -344,49 +327,50 @@ double cell::_diagH(int k)
     }
   }
 
-  // printf("Eigenvalues:   ");
-  // for (int i = 0; i < _eigvals.size(); i++)
-  //   printf("%g ", _eigvals[i]);
-  // printf("      ");
+  printf("Eigenvalues:   ");
+  for (int i = 0; i < _eigvals.size(); i++)
+    printf("%g  ", _eigvals[i]);
+  printf("\n");
 
   return dt;
 }
 
 
-void cell::_calcRho(int k)
-{
-  int npw = _npw_perk[k];
+// void cell::_calcRho(int k)
+// {
+//   int npw = _npw_perk[k];
  
-  /* Calculate \rho in reciprocal space:
-     \rho(G) = {1\over \Omega} \sum_{G'}\psi^*(G'-G)\psi(G') */
-  for (int i = 0; i < npw; i++)
-  {
-    int ik = _igk(i, k);
-    for (int j = 0; j < npw; j++)
-    {
-      int jk = _igk(j, k);
+//   /* Calculate \rho in reciprocal space:
+//      \rho(G) = {1\over \Omega} \sum_{G'}\psi^*(G'-G)\psi(G') */
+//   for (int i = 0; i < npw; i++)
+//   {
+//     int ik = _igk(i, k);
+//     for (int j = 0; j < npw; j++)
+//     {
+//       int jk = _igk(j, k);
 
-      int n1 = _mill(0, ik) - _mill(0, jk);
-      int n2 = _mill(1, ik) - _mill(1, jk);
-      int n3 = _mill(2, ik) - _mill(2, jk);
+//       int n1 = _mill(0, ik) - _mill(0, jk);
+//       int n2 = _mill(1, ik) - _mill(1, jk);
+//       int n3 = _mill(2, ik) - _mill(2, jk);
 
-      string str = miller(n1,n2,n3);
-      int ng = _indg[str];
+//       string str = miller(n1,n2,n3);
+//       int ng = _indg[str];
+//       // int ng = _indg(n1, n2, n3);
 
-      for (int nb = 0; nb < _nbands; nb++)
-      {
-	_rhoout[ng] += _wk[k]*_eigvecs[i*_nbands + nb]*_eigvecs[j*_nbands + nb];
-	// Would need conjugate for complex Hamiltonians
-      }
-    }
-  }
-}
+//       for (int nb = 0; nb < _nbands; nb++)
+//       {
+// 	_rhoout[ng] += _wk[k]*_eigvecs[i*_nbands + nb]*_eigvecs[j*_nbands + nb];
+// 	// Would need conjugate for complex Hamiltonians
+//       }
+//     }
+//   }
+// }
 
 
 void cell::_sumCharge(int k)
 {
   int memsize = sizeof(cufftDoubleComplex)*_nr0*_nr1*_nr2;
-  cufftDoubleComplex* h_aux = (cufftDoubleComplex*)malloc(memsize);
+  cufftDoubleComplex *h_aux = (cufftDoubleComplex*)malloc(memsize);
   cufftDoubleComplex *d_aux;
   cufftHandle plan;
   cufftType CUFFT_C2C;
@@ -396,6 +380,12 @@ void cell::_sumCharge(int k)
 
   for (int nb = 0; nb < _nbands; nb++)
   {
+    for (int l = 0; l < _nr0*_nr1*_nr2; l++)
+    {
+      h_aux[l].x = 0.;
+      h_aux[l].y = 0.;
+    }
+    
     for (int n0 = 0; n0 < _nr0; n0++)
     {
       for (int n1 = 0; n1 < _nr1; n1++)
@@ -416,14 +406,16 @@ void cell::_sumCharge(int k)
 	      m2 += _nr2;
 
 	    // Miller indices run from -n/2 to n/2
-	    // m0, m1, m2 run from 0 to _nr1, _nr2, _nr3
+	    // m0, m1, m2 run from 0 to _nr0, _nr1, _nr2
 	    // with negative values refolded so they lie
 	    // in the "far side of the cell" in G space
 
 	    // std::cout << "m0: " << m0 << " m1: " << m1 << " m2: " << m2 << std::endl;
-
-	    h_aux[m0 + m1*_nr1 + m2*_nr1*_nr2].x = _eigvecs[i*_nbands + nb];
-	    h_aux[m0 + m1*_nr1 + m2*_nr1*_nr2].y = 0;
+	    cufftDoubleComplex value;
+	    value.x = _eigvecs[i + _nbands*nb];
+	    value.y = 0.;
+	    h_aux[m0 + m1*_nr1 + m2*_nr1*_nr2].x = value.x;
+	    h_aux[m0 + m1*_nr1 + m2*_nr1*_nr2].y = value.y;
 	    // d_aux[m0][m1][m2] = _eigvecs[i*_nbands + nb];
 
 	  }
@@ -460,14 +452,27 @@ void cell::_sumCharge(int k)
     
     cudaMemcpy(&h_aux[0], &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
-    for (int i = 0; i < npw; i++)
+    int lll = 0;
+    for (int k = 0; k < _nr2; k++)
     {
-      // Factor of 2 for spin degeneracy. 1/_vol comes from def of plane waves
-      _rhoout[i] += 2*_wk[k]*std::abs(pow(h_aux[i].x, 2) + pow(h_aux[i].y, 2))/_vol;
+      for (int j = 0; j < _nr1; j++)
+      {
+	for (int i = 0; i < _nr0; i++)
+	{
+	  // Factor of 2 for spin degeneracy. 1/_vol comes from def of plane waves
+	  _rhoout(i,j,k) += 2*_wk[k]*std::abs(pow(h_aux[i + j*_nr0 + k*_nr0*_nr1].x, 2) + 
+					      pow(h_aux[i + j*_nr0 + k*_nr0*_nr1].y, 2))/_vol;
+	  
+	  printf("rhoout = %12.8f\n", _rhoout(i,j,k));
+	  lll += 1;
+	}
+      }
     }
+    cudaFree(d_aux);
   }
+
   cufftDestroy(plan);
-  cudaFree(d_aux);
+
 }
 
 
@@ -476,23 +481,18 @@ void cell::_scf(void)
   // Timing:
   struct timeval start, end;   double dt;   gettimeofday(&start, NULL);
 
-  _nbands = 8;
+  _nbands = 1;
   _nelec = 8;
-  _max_iter = 4;
+  _max_iter = 1;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
-  _rhoin.resize(_npw, 0.);
-  _rhoout.resize(_npw, 0.);
-  _v.resize(_npw, 0.);
-
-  // Set \rho_in(G=0) to the correct value.
-  string origin = miller(0,0,0);
-  _rhoin[_indg[origin]] = _nelec/_vol;
+  _rhoin.Initialize(_nr0, _nr1, _nr2, _nelec/_vol);
+  _vg.resize(_npw, 0.);
 
   for (int iter = 0; iter < _max_iter; iter++)
   {
-    _rhoout.resize(_npw, 0.);
+    _rhoout.Initialize(_nr0, _nr1, _nr2, 0.);
 
     for (int k = 0; k < _nk; k++)
     {
@@ -513,7 +513,7 @@ void cell::_scf(void)
       _sumCharge(k);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      printf("Time (sec) for _calcRho: %g\n", dt1);
+      printf("Time (sec) for _sumCharge: %g\n", dt1);
     }
 
     struct timeval start1, end1; double dt1; gettimeofday(&start1, NULL);
@@ -524,34 +524,36 @@ void cell::_scf(void)
     // Charge mixing
 
     double charge = 0;
-    for (int i = 0; i < _npw; i++)
-      charge += std::abs(_rhoout[i]);
-    //charge *= _vol/(_nr0*_nr1*_nr2);
+    for (int i = 0; i < _nr0; i++)
+      for (int j = 0; j < _nr1; j++)
+	for (int k = 0; k < _nr2; k++)
+	  charge += std::abs(_rhoout(i,j,k)) * _vol/(_nr0*_nr1*_nr2);
+    
     std::cout << "Charge: " << charge << std::endl;
 
-    double drho2 = 0.;
-    for (int i = 0; i < _npw; i++)
-      drho2 += pow(_rhoout[i] - _rhoin[i], 2);
+    // double drho2 = 0.;
+    // for (int i = 0; i < _npw; i++)
+    //   drho2 += pow(_rhoout[i] - _rhoin[i], 2);
 
-    if ( sqrt(drho2) < _threshold)
-    {
-      printf("Convergence threshold %g reached\n", _threshold);
-      break;
-    }
-    else 
-      printf("Delta rho = %g\n", sqrt(drho2));
+    // if ( sqrt(drho2) < _threshold)
+    // {
+    //   printf("Convergence threshold %g reached\n", _threshold);
+    //   break;
+    // }
+    // else 
+    //   printf("Delta rho = %g\n", sqrt(drho2));
     
-    for (int i = 0; i < _npw; i++)
-      _rhoin[i] = _alpha * _rhoin[i] + (1.-_alpha)*_rhoout[i];
+    // for (int i = 0; i < _npw; i++)
+    //   _rhoin[i] = _alpha * _rhoin[i] + (1.-_alpha)*_rhoout[i];
 
     // New charge is now in rhoout. Calculate new potential hartree term in G space
-    for (int ng = 0; ng < _npw; ng++)
-    {
-      if (_G2[ng] > _eps)
-	_v[ng] = 4*M_PI*_e2*_rhoin[ng]/_G2[ng];
-      else
-	_v[ng] = 0.;
-    }
+    // for (int ng = 0; ng < _npw; ng++)
+    // {
+    //   if (_G2[ng] > _eps)
+    // 	_vg[ng] = 4*M_PI*_e2*_rhoin[ng]/_G2[ng];
+    //   else
+    // 	_vg[ng] = 0.;
+    // }
     gettimeofday(&end1, NULL);
     dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
     std::cout << "Time (sec) for all charge mixing stuff: " << dt1 << std::endl;

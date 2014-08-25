@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 
-class Array3d
+class Array3D
 {
   /* This class provides an interface to a 1D static array so that
    * array accesses can be handled like 3D array accesses. This differs 
@@ -15,7 +15,8 @@ private:
   double *a;
 
 public:
-  Array3d(int x, int y, int z, double value)
+  Array3D() { }
+  Array3D(int x, int y, int z, double value)
   {
     _x = x; _y = y; _z = z;
     _size = _x*_y*_z;
@@ -24,9 +25,17 @@ public:
     for (int i = 0; i < _size; i++)
       a[i] = value;
   }
+  void Initialize(int x, int y, int z, double value)
+  {
+    _x = x; _y = y; _z = z;
+    _size = _x*_y*_z;
+    a = (double*)malloc(_size*sizeof(double));
+    for (int i = 0; i < _size; i++)
+      a[i] = value;
+  }
   double& operator() (int i, int j, int k)
   {
-    int index = i + j*_xl + k*_xl*_yl;
+    int index = i + j*_x + k*_x*_y;
     if (index < _size && index >= 0)
       return a[index];
     else
@@ -37,7 +46,7 @@ public:
   }
   const double& operator() (int i, int j, int k) const
   {
-    int index = i + j*_xl + k*_xl*_yl;
+    int index = i + j*_x + k*_x*_y;
     if (index < _size && index >= 0)
       return a[index];
     else
@@ -46,7 +55,11 @@ public:
       exit(1);
     }
   }
-  ~Array3d()
+  // double& ref(void)
+  // {
+  //   return &a[0];
+  // }
+  ~Array3D()
   {
     free(a);
   }

@@ -8,6 +8,10 @@
 #include <cula.h>
 #include <cula_lapack.h>
 
+#include "IndG.hpp"
+#include "Array3d.hpp"
+#include "tools.hpp"
+
 using namespace Eigen;
 using std::string;
 using std::vector;
@@ -48,6 +52,7 @@ private:
   vector<double> _wk;          // Weights of k points
   MatrixXd _k;                 // k-points in the Brillouin Zone
   std::map<string, int> _indg; // Gives the index of a G vector from its Miller indices
+  // IndG _indg;
 
   double _eps;                 // Small quantity for calculation of vsg
   double _e2;                  // 
@@ -57,10 +62,9 @@ private:
   int _nbands;                 // Number of occupied bands
   int _max_iter;               // Max # of SCF iterations
 
-  vector<double> _rhoin;          // Input charge density
-  vector<double> _rhoout;         // Output charge density
-  vector<double> _v;              // Reciprocal space potential
-  std::map<string, double> _rhor; // Real-space charge density
+  Array3D _rhoin;                 // Input charge density (real space)
+  Array3D _rhoout;                // Output charge density (real space)
+  vector<double> _vg;             // Reciprocal space potential
   std::map<string, double> _vr;   // Real-space exchange and coulomb potetial
 
   // Methods to be used:

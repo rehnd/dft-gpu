@@ -12,15 +12,15 @@
 int main(int argc, char* argv[])
 {
   // input parameters are number of mesh points in x and y directions
-  if (argc < 4)
+  if (argc != 2)
   {
-    std::cerr << "Usage:\n\t" << argv[0] << " <E_cut> <Lat_const> <n_k>" << std::endl;
+    std::cerr << "Usage:\n\t" << argv[0] << " <E_cut>" << std::endl;
     return(1);
   }
 
   double ecut = atof(argv[1]);
-  double latconst = atof(argv[2]);
-  int nk = atoi(argv[3]); // Number of k points to use
+  double latconst = 10.26;
+  int nk = 1; // For now, will be rewritten in cell.cpp)
 
   // Initialize computational cell, run scf
   cell silicon(ecut, latconst, nk);
