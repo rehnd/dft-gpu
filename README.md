@@ -14,4 +14,4 @@ The directory structure is set up as follows:
 
 The diagonalization on the GPU runs about 10x faster than on a single CPU. A minor scaling study is shown below.
 
-![Scaling](scaling.png =800x500 "Scaling of Diagonalization and $\rho(\vec G)$, computed in Reciprocal space")
+![Scaling study](scaling.png "Scaling of Diagonalization and charge computed in Reciprocal space")
