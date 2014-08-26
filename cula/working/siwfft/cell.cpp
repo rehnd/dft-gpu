@@ -449,13 +449,12 @@ void cell::_v_of_rho(void)
   for (int i = 0; i < _nr0; i++)
     for (int j = 0; j < _nr1; j++)
       for (int k = 0; k < _nr2; k++) {
-	_vr(i,j,k).x = -_e2*pow(3.*_rhoin(i,j,k)/M_PI, 1./3.);
+	_vr(i,j,k).x = -_e2*pow(3.*_rhoin(i,j,k)/M_PI, (1./3.));
 	_vr(i,j,k).y = 0.;
       }
 
   // Take FFT of V(r) -> V(G)
   cudaMemcpy(&d_aux[0], _vr.a, memsize, cudaMemcpyHostToDevice);
-  
   if (cufftPlan3d(&plan, _nr0, _nr1, _nr2, CUFFT_Z2Z) != CUFFT_SUCCESS) {
     fprintf(stderr, "CUFFT error: Plan creation failed\n"); return;
   }
@@ -465,10 +464,9 @@ void cell::_v_of_rho(void)
   if (cudaDeviceSynchronize() != cudaSuccess) {
     fprintf(stderr, "Cuda error: Failed to synchronize\n");  return;
   }
-  
   cudaMemcpy(_vr.a, &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
-  // Now get V(G) from _vr
+  // Now get _vg from _vr
   _vg.resize(_npw, 0.);
   for (int i = 0; i < _npw; i++)
   {
@@ -485,10 +483,51 @@ void cell::_v_of_rho(void)
     _vg[i] = _vr(m0,m1,m2).x;
   }
 
-  // Now compute Hartree potential (have to bring \rho(G) to G-space)
-  Array3D<cufftDoubleComplex> h_aux(_nr0,_nr1,_nr2,zero);
+  // Need a new vector to store \rho(G) and a way to store the v(G) from v(r)
+  std::vector<double> rhog(_npw, 0.);
+  Array3D<cufftDoubleComplex> vg_(_nr0,_nr1,_nr2,zero);
+  
+  for (int i = 0; i < _nr0; i++)
+    for (int j = 0; j < _nr1; j++)
+      for (int k = 0; k < _nr2; k++) {
+	vg_(i,j,k).x = _rhoin(i,j,k);
+	vg_(i,j,k).y = 0.;
+      }
 
+  // To compute Hartree potential, have to bring \rho(G) to G-space
+  cudaMemcpy(&d_aux[0], vg_.a, memsize, cudaMemcpyHostToDevice);
+  if (cufftPlan3d(&plan, _nr0, _nr1, _nr2, CUFFT_Z2Z) != CUFFT_SUCCESS) {
+    fprintf(stderr, "CUFFT error: Plan creation failed\n"); return;
+  }
+  if (cufftExecZ2Z(plan, &d_aux[0], &d_aux[0], CUFFT_INVERSE) != CUFFT_SUCCESS) {
+    fprintf(stderr, "CUFFT error: ExecZ2Z failed\n");  return;
+  }
+  if (cudaDeviceSynchronize() != cudaSuccess) {
+    fprintf(stderr, "Cuda error: Failed to synchronize\n");  return;
+  }
+  cudaMemcpy(vg_.a, &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
+  // Now get \rho(G) from vg_
+  for (int i = 0; i < _npw; i++)
+  {
+    int m0 = _mill(0, i);
+    if (m0 < 0)
+      m0 += _nr0;
+    int m1 = _mill(1, i);
+    if (m1 < 0)
+      m1 += _nr1;
+    int m2 = _mill(2, i);
+    if (m2 < 0)
+      m2 += _nr2;
+    
+    rhog[i] = vg_(m0,m1,m2).x;
+  }
+
+  printf("Check: rho(G=0) ?= nelec/volume: %5.5f\n", rhog[0]*_vol);
+  
+  for (int i = 0; i < _npw; i++)
+    if (_G2[i] > _eps)
+      _vg[i] += 4*M_PI*rhog[i] / _G2[i];
 
   cudaFree(d_aux);
   cufftDestroy(plan);
@@ -502,7 +541,7 @@ void cell::_scf(void)
 
   _nbands = 4;
   _nelec = 8;
-  _max_iter = 2;
+  _max_iter = 4;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
@@ -553,7 +592,9 @@ void cell::_scf(void)
     }
     else 
       printf("Delta rho = %10.3e\n", drho2);
-    
+   
+    _v_of_rho();
+ 
     gettimeofday(&end1, NULL);
     dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
     printf("Time (sec) for all charge mixing stuff: %g\n", dt1);
