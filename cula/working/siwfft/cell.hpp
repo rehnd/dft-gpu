@@ -1,3 +1,6 @@
+#ifndef CELL_HPP
+#define CELL_HPP
+
 #include <stdlib.h>
 #include <vector>
 #include <string>
@@ -7,6 +10,7 @@
 
 #include <cula.h>
 #include <cula_lapack.h>
+#include <cufft.h>
 
 #include "IndG.hpp"
 #include "Array3d.hpp"
@@ -44,7 +48,7 @@ private:
   std::vector<double> _H;      // Hamiltonian
 
   vector<double> _eigvecs;     // Eigenvectors of H
-  vector<double> _eigvals;           // Eigenvalues of H
+  vector<double> _eigvals;     // Eigenvalues of H
 
   int _nm0, _nm1, _nm2;        // Maximum values of Miller Indices
   int _nr0, _nr1, _nr2;        // Real-space Grid Dimensions
@@ -55,36 +59,33 @@ private:
   // IndG _indg;
 
   double _eps;                 // Small quantity for calculation of vsg
-  double _e2;                  // 
+  double _e2;                  // Conversion factor between Rydbergs and Hartrees
   double _alpha;               // Mixing parameter for SCF loop
   double _threshold;           // Threshold for charge comparison
   int _nelec;                  // Number of electrons per unit cell
   int _nbands;                 // Number of occupied bands
   int _max_iter;               // Max # of SCF iterations
 
-  Array3D _rhoin;                 // Input charge density (real space)
-  Array3D _rhoout;                // Output charge density (real space)
-  vector<double> _vg;             // Reciprocal space potential
-  std::map<string, double> _vr;   // Real-space exchange and coulomb potetial
+  Array3D<double> _rhoin;          // Input charge density (real space)
+  Array3D<double> _rhoout;         // Output charge density (real space)
+  Array3D<cufftDoubleComplex> _vr; // Real-space exchange and coulomb potetial
+  vector<double> _vg;              // Reciprocal space potential
 
-  // Methods to be used:
-  void _get_plane_waves();
-  void _set_H_kin();
-  void _set_H_pot();
-  void _set_H_hartree();
-  double _compute_eigs();
-  void _compute_eigs_cula();
-  void _update_hamiltonian(Vector3d& delta);
-  // void _convert_H_to_culaDouble(const std::vector<double> &shiftedH, culaDouble* shiftedH_cula);
-  void _get_SG();
-  void _count_nk();
-  void _fillH(int k);
+  // Internal methods
+  void   _get_plane_waves();
+  void   _get_SG();
+  void   _count_nk();
+  void   _fillH(int k);
   double _form_factor(double G2);
   double _diagH(int k);
-  void _calcRho(int k);
-  void _sumCharge(int k);
-  
+  void   _calcRho(int k);
+  void   _sumCharge(int k);
+  double _mix_charge(void);
+  void   _v_of_rho(void);
+
 public:
   cell(double ecut, double latconst, int nk);
   void _scf();
 };
+
+#endif /* CELL_HPP */

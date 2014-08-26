@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 
-
+template <typename T>
 class Array3D
 {
   /* This class provides an interface to a 1D static array so that
@@ -12,28 +12,28 @@ class Array3D
 private:
   int _x, _y, _z; // Array runs from [-_x, _x], [-_y, _y], and [-_z, _z]
   int _size;
-  double *a;
 
 public:
+  T *a;
   Array3D() { }
-  Array3D(int x, int y, int z, double value)
+  Array3D(int x, int y, int z, T value)
   {
     _x = x; _y = y; _z = z;
     _size = _x*_y*_z;
-    a = (double*)malloc(_size*sizeof(double));
+    a = (T*)malloc(_size*sizeof(T));
 
     for (int i = 0; i < _size; i++)
       a[i] = value;
   }
-  void Initialize(int x, int y, int z, double value)
+  void Initialize(int x, int y, int z, T value)
   {
     _x = x; _y = y; _z = z;
     _size = _x*_y*_z;
-    a = (double*)malloc(_size*sizeof(double));
+    a = (T*)malloc(_size*sizeof(T));
     for (int i = 0; i < _size; i++)
       a[i] = value;
   }
-  double& operator() (int i, int j, int k)
+  T& operator() (int i, int j, int k)
   {
     int index = i + j*_x + k*_x*_y;
     if (index < _size && index >= 0)
@@ -44,7 +44,7 @@ public:
       exit(1);
     }
   }
-  const double& operator() (int i, int j, int k) const
+  const T& operator() (int i, int j, int k) const
   {
     int index = i + j*_x + k*_x*_y;
     if (index < _size && index >= 0)
@@ -55,10 +55,6 @@ public:
       exit(1);
     }
   }
-  // double& ref(void)
-  // {
-  //   return &a[0];
-  // }
   ~Array3D()
   {
     free(a);

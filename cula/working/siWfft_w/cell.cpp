@@ -322,7 +322,7 @@ double cell::_diagH(int k)
     for (int j = 0; j < _nbands; j++)
     {
       double val = (double) culaH[i + j*_nbands];
-      _eigvecs[i + j*_nbands] = val;
+      _eigvecs[i + j*npw] = val;
       _eigvals[j] = w[j];
     }
   }
@@ -444,7 +444,7 @@ void cell::_scf(void)
   // Timing:
   struct timeval start, end;   double dt;   gettimeofday(&start, NULL);
 
-  _nbands = 1;
+  _nbands = 4;
   _nelec = 8;
   _max_iter = 1;
   _alpha = 0.5; // Charge mixing parameter

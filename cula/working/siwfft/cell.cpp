@@ -36,10 +36,8 @@ cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latcon
   _wk.resize(1,1); // Weights of each k point (initialize to 1)
 
   /* Below: Components of $\tau$ vector. Note: for now, leaving out
-     a_0 which should multiply each component. This, along with
-     computation of the structure factor is very contrived for now -
-     basically following a code until I can find a better description
-     of calculating S(G) */
+     a_0 which should multiply each component. Really should change
+     this later so that S(G) = 2*cos(G\cdot \tau) with correct units */
   _tau0 = 0.125; _tau1 = 0.125; _tau2 = 0.125; 
 
   // Define lattice vectors
@@ -59,8 +57,6 @@ cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latcon
   _k(2,0) = 0.0;
 
   _get_plane_waves();
-  // _G = Map<MatrixXd>(_G.data(),3,_npw);  // Remap this to a 3 x _npw matrix
-
   _get_SG();
   _count_nk();
 }
@@ -109,7 +105,6 @@ void cell::_get_plane_waves()
 	{
 	  _G(0, ng) = pw(0); _G(1,ng) = pw(1); _G(2,ng) = pw(2);
 	  _G2[ng] = G_G;
-	  // _mill.col(ng) << i, j, k;
 	  _mill(0,ng) = i; _mill(1,ng) = j; _mill(2,ng) = k;
 	  ng++;
 	}
@@ -156,18 +151,12 @@ void cell::_get_plane_waves()
 void cell::_get_SG(void)
 {
   // Calculates the geometrical structure factors S(G)
-
   _SG.resize(_npw, 0);
-
-  for (int i = 0; i < _npw; i++) {
-    // printf ("%12.8f, %12.8f, %12.8f\n",
-    // 	    _G(0,i)/std::abs(_b1(0)) , 
-    // 	    _G(1,i)/std::abs(_b1(0)) , 
-    // 	    _G(2,i)/std::abs(_b1(0)) );
+  for (int i = 0; i < _npw; i++) 
+  {
     _SG[i] = 2.0*cos( 2*M_PI*(_G(0,i)*_tau0/std::abs(_b1(0)) + 
 			      _G(1,i)*_tau1/std::abs(_b1(0)) + 
 			      _G(2,i)*_tau2/std::abs(_b1(0)) )) / _vol ;
-    // printf("SG[%d] = %12.6f\n", i, _SG[i]);
   }
 }
 
@@ -322,7 +311,7 @@ double cell::_diagH(int k)
     for (int j = 0; j < _nbands; j++)
     {
       double val = (double) culaH[i + j*_nbands];
-      _eigvecs[i + j*_nbands] = val;
+      _eigvecs[i + j*npw] = val;
       _eigvals[j] = w[j];
     }
   }
@@ -336,37 +325,6 @@ double cell::_diagH(int k)
 }
 
 
-// void cell::_calcRho(int k)
-// {
-//   int npw = _npw_perk[k];
- 
-//   /* Calculate \rho in reciprocal space:
-//      \rho(G) = {1\over \Omega} \sum_{G'}\psi^*(G'-G)\psi(G') */
-//   for (int i = 0; i < npw; i++)
-//   {
-//     int ik = _igk(i, k);
-//     for (int j = 0; j < npw; j++)
-//     {
-//       int jk = _igk(j, k);
-
-//       int n1 = _mill(0, ik) - _mill(0, jk);
-//       int n2 = _mill(1, ik) - _mill(1, jk);
-//       int n3 = _mill(2, ik) - _mill(2, jk);
-
-//       string str = miller(n1,n2,n3);
-//       int ng = _indg[str];
-//       // int ng = _indg(n1, n2, n3);
-
-//       for (int nb = 0; nb < _nbands; nb++)
-//       {
-// 	_rhoout[ng] += _wk[k]*_eigvecs[i*_nbands + nb]*_eigvecs[j*_nbands + nb];
-// 	// Would need conjugate for complex Hamiltonians
-//       }
-//     }
-//   }
-// }
-
-
 void cell::_sumCharge(int k)
 {
   int npw = _npw_perk[k];
@@ -374,6 +332,7 @@ void cell::_sumCharge(int k)
 
   cufftDoubleComplex *h_aux = (cufftDoubleComplex*)malloc(memsize);
   cufftDoubleComplex *d_aux;
+  cudaMalloc((void**)&d_aux, memsize);;
   cufftHandle plan;
   cufftType CUFFT_C2C;
 
@@ -384,12 +343,11 @@ void cell::_sumCharge(int k)
       h_aux[l].x = 0.;
       h_aux[l].y = 0.;
     }
-    
-    for (int n2 = 0; n2 < _nr2; n2++)
+    for (int n0 = 0; n0 < _nr0; n0++)
     {
       for (int n1 = 0; n1 < _nr1; n1++)
       {
-	for (int n0 = 0; n0 < _nr0; n0++)
+	for (int n2 = 0; n2 < _nr2; n2++)
 	{
 	  for (int i = 0; i < npw; i++)
 	  {
@@ -415,8 +373,7 @@ void cell::_sumCharge(int k)
 	}
       }
     }
-    
-    cudaMalloc((void**)&d_aux, memsize);
+
     if (cudaGetLastError() != cudaSuccess)
     {
       fprintf(stderr, "Cuda error: Failed to allocate\n");
@@ -425,27 +382,18 @@ void cell::_sumCharge(int k)
 
     cudaMemcpy(&d_aux[0], &h_aux[0], memsize, cudaMemcpyHostToDevice);
 
-    if (cufftPlan3d(&plan, _nr0, _nr1, _nr2, CUFFT_Z2Z) != CUFFT_SUCCESS)
-    {
-      fprintf(stderr, "CUFFT error: Plan creation failed\n");
-      return;
+    if (cufftPlan3d(&plan, _nr0, _nr1, _nr2, CUFFT_Z2Z) != CUFFT_SUCCESS) {
+      fprintf(stderr, "CUFFT error: Plan creation failed\n"); return;
     }
-
-    if (cufftExecZ2Z(plan, &d_aux[0], &d_aux[0], CUFFT_FORWARD) != CUFFT_SUCCESS)
-    {
-      fprintf(stderr, "CUFFT error: ExecZ2Z failed\n");
-      return;
+    if (cufftExecZ2Z(plan, &d_aux[0], &d_aux[0], CUFFT_FORWARD) != CUFFT_SUCCESS) {
+      fprintf(stderr, "CUFFT error: ExecZ2Z failed\n");  return;
     }
-
-    if (cudaDeviceSynchronize() != cudaSuccess)
-    {
-      fprintf(stderr, "Cuda error: Failed to synchronize\n");
-      return;
+    if (cudaDeviceSynchronize() != cudaSuccess) {
+      fprintf(stderr, "Cuda error: Failed to synchronize\n");  return;
     }
     
     cudaMemcpy(&h_aux[0], &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
-    int lll = 0;
     for (int i = 0; i < _nr0; i++)
     {
       for (int j = 0; j < _nr1; j++)
@@ -460,11 +408,90 @@ void cell::_sumCharge(int k)
 	}
       }
     }
-    cudaFree(d_aux);
+  }
+  cudaFree(d_aux);
+  cufftDestroy(plan);
+}
+
+
+double cell::_mix_charge(void)
+{
+  double drho2 = 0;
+  for (int i = 0; i < _nr0; i++)
+    for (int j = 0; j < _nr1; j++)
+      for (int k = 0; k < _nr2; k++)
+	drho2 += pow(std::abs(_rhoout(i,j,k) - _rhoin(i,j,k)),2);
+
+  drho2 = sqrt(drho2 * _vol / (_nr0*_nr1*_nr2));
+
+  for (int i = 0; i < _nr0; i++)
+    for (int j = 0; j < _nr1; j++)
+      for (int k = 0; k < _nr2; k++)
+	_rhoin(i,j,k) = _alpha*_rhoin(i,j,k) + (1. - _alpha)*_rhoout(i,j,k);
+
+  return drho2;
+}
+
+
+void cell::_v_of_rho(void)
+{
+
+  // Initialization of cuFFT stuff
+  int memsize = sizeof(cufftDoubleComplex)*_nr0*_nr1*_nr2;
+  cufftDoubleComplex *d_aux;
+  cudaMalloc((void**)&d_aux, memsize);;
+  cufftHandle plan;
+  cufftType CUFFT_C2C;
+
+  // Compute Exchange-Correlation Potential in real space
+  cufftDoubleComplex zero; zero.x = 0., zero.y = 0;
+  _vr.Initialize(_nr0,_nr1,_nr2, zero);
+  for (int i = 0; i < _nr0; i++)
+    for (int j = 0; j < _nr1; j++)
+      for (int k = 0; k < _nr2; k++) {
+	_vr(i,j,k).x = -_e2*pow(3.*_rhoin(i,j,k)/M_PI, 1./3.);
+	_vr(i,j,k).y = 0.;
+      }
+
+  // Take FFT of V(r) -> V(G)
+  cudaMemcpy(&d_aux[0], _vr.a, memsize, cudaMemcpyHostToDevice);
+  
+  if (cufftPlan3d(&plan, _nr0, _nr1, _nr2, CUFFT_Z2Z) != CUFFT_SUCCESS) {
+    fprintf(stderr, "CUFFT error: Plan creation failed\n"); return;
+  }
+  if (cufftExecZ2Z(plan, &d_aux[0], &d_aux[0], CUFFT_FORWARD) != CUFFT_SUCCESS) {
+    fprintf(stderr, "CUFFT error: ExecZ2Z failed\n");  return;
+  }
+  if (cudaDeviceSynchronize() != cudaSuccess) {
+    fprintf(stderr, "Cuda error: Failed to synchronize\n");  return;
+  }
+  
+  cudaMemcpy(_vr.a, &d_aux[0], memsize, cudaMemcpyDeviceToHost);
+
+  // Now get V(G) from _vr
+  _vg.resize(_npw, 0.);
+  for (int i = 0; i < _npw; i++)
+  {
+    int m0 = _mill(0, i);
+    if (m0 < 0)
+      m0 += _nr0;
+    int m1 = _mill(1, i);
+    if (m1 < 0)
+      m1 += _nr1;
+    int m2 = _mill(2, i);
+    if (m2 < 0)
+      m2 += _nr2;
+    
+    _vg[i] = _vr(m0,m1,m2).x;
   }
 
-  cufftDestroy(plan);
+  // Now compute Hartree potential (have to bring \rho(G) to G-space)
+  Array3D<cufftDoubleComplex> h_aux(_nr0,_nr1,_nr2,zero);
 
+
+
+  cudaFree(d_aux);
+  cufftDestroy(plan);
 }
 
 
@@ -473,7 +500,7 @@ void cell::_scf(void)
   // Timing:
   struct timeval start, end;   double dt;   gettimeofday(&start, NULL);
 
-  _nbands = 8;
+  _nbands = 4;
   _nelec = 8;
   _max_iter = 2;
   _alpha = 0.5; // Charge mixing parameter
@@ -509,11 +536,6 @@ void cell::_scf(void)
     }
 
     struct timeval start1, end1; double dt1; gettimeofday(&start1, NULL);
-    // Account for factor 2 (spin degeneracy) in rhoout:
-    // for (int i = 0; i < _npw; i++)
-    //   _rhoout[i] = 2. * _rhoout[i] / _vol;
-
-    // Charge mixing
 
     double charge = 0;
     for (int i = 0; i < _nr0; i++)
@@ -521,39 +543,25 @@ void cell::_scf(void)
 	for (int k = 0; k < _nr2; k++)
 	  charge += std::abs(_rhoout(i,j,k)) * _vol/(_nr0*_nr1*_nr2);
     
-    std::cout << "Charge: " << charge << std::endl;
+    printf("Charge: %8.8f\n", charge);
 
-    // double drho2 = 0.;
-    // for (int i = 0; i < _npw; i++)
-    //   drho2 += pow(_rhoout[i] - _rhoin[i], 2);
-
-    // if ( sqrt(drho2) < _threshold)
-    // {
-    //   printf("Convergence threshold %g reached\n", _threshold);
-    //   break;
-    // }
-    // else 
-    //   printf("Delta rho = %g\n", sqrt(drho2));
+    double drho2 = _mix_charge();
+    if ( drho2 < _threshold)
+    {
+      printf("Convergence threshold %g reached\n", _threshold);
+      break;
+    }
+    else 
+      printf("Delta rho = %10.3e\n", drho2);
     
-    // for (int i = 0; i < _npw; i++)
-    //   _rhoin[i] = _alpha * _rhoin[i] + (1.-_alpha)*_rhoout[i];
-
-    // New charge is now in rhoout. Calculate new potential hartree term in G space
-    // for (int ng = 0; ng < _npw; ng++)
-    // {
-    //   if (_G2[ng] > _eps)
-    // 	_vg[ng] = 4*M_PI*_e2*_rhoin[ng]/_G2[ng];
-    //   else
-    // 	_vg[ng] = 0.;
-    // }
     gettimeofday(&end1, NULL);
     dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-    std::cout << "Time (sec) for all charge mixing stuff: " << dt1 << std::endl;
+    printf("Time (sec) for all charge mixing stuff: %g\n", dt1);
   }
 
   // Timing:
   gettimeofday(&end, NULL);
   dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-  std::cout << "Time (sec) for _scf: " << dt << std::endl;
+  printf("Time (sec) for _scf: %g\n", dt);
 
 }
