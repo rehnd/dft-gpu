@@ -6,7 +6,6 @@
 #include <string>
 #include <sstream>
 #include <map>
-#include <complex>
 #include <sys/time.h>
 
 #include <Eigen/Dense>
@@ -19,6 +18,7 @@
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 #include <cufft.h>
+#include <fftw3.h>
 
 #include "cell.hpp"
 #include "Array3d.hpp"
@@ -369,21 +369,19 @@ double cell::_diagH(int k)
 
 void cell::_sumCharge(int k)
 {
-  int memsize = sizeof(cufftDoubleComplex)*_nr0*_nr1*_nr2;
-  cufftDoubleComplex *h_aux = (cufftDoubleComplex*)malloc(memsize);
-  cufftDoubleComplex *d_aux;
-  cufftHandle plan;
-  cufftType CUFFT_C2C;
-  int nrank = 3;
-
   int npw = _npw_perk[k];
+
+  int memsize = sizeof(fftw_complex)*_nr0*_nr1*_nr2;
+  fftw_complex *in  = (fftw_complex*)fftw_malloc(memsize);
+  fftw_complex *out = (fftw_complex*)fftw_malloc(memsize);
+  fftw_plan p;
 
   for (int nb = 0; nb < _nbands; nb++)
   {
     for (int l = 0; l < _nr0*_nr1*_nr2; l++)
     {
-      h_aux[l].x = 0.;
-      h_aux[l].y = 0.;
+      in[l][0] = 0.;
+      in[l][1] = 0.;
     }
     
     for (int n0 = 0; n0 < _nr0; n0++)
@@ -397,7 +395,7 @@ void cell::_sumCharge(int k)
 	    int ik = _igk(i, k);
 	    int m0 = _mill(0, ik);
 	    if (m0 < 0)
-	      m0 += _nr1;
+	      m0 += _nr0;
 	    int m1 = _mill(1, ik);
 	    if (m1 < 0)
 	      m1 += _nr1;
@@ -410,69 +408,34 @@ void cell::_sumCharge(int k)
 	    // with negative values refolded so they lie
 	    // in the "far side of the cell" in G space
 
-	    // std::cout << "m0: " << m0 << " m1: " << m1 << " m2: " << m2 << std::endl;
-	    cufftDoubleComplex value;
-	    value.x = _eigvecs[i + _nbands*nb];
-	    value.y = 0.;
-	    h_aux[m0 + m1*_nr1 + m2*_nr1*_nr2].x = value.x;
-	    h_aux[m0 + m1*_nr1 + m2*_nr1*_nr2].y = value.y;
-	    // d_aux[m0][m1][m2] = _eigvecs[i*_nbands + nb];
-
+	    in[m0 + m1*_nr0 + m2*_nr0*_nr1][0] = _eigvecs[i + npw*nb];
+	    in[m0 + m1*_nr0 + m2*_nr0*_nr1][1] = 0;
 	  }
 	}
       }
     }
     
-    cudaMalloc((void**)&d_aux, memsize);
-    if (cudaGetLastError() != cudaSuccess)
-    {
-      fprintf(stderr, "Cuda error: Failed to allocate\n");
-      return;
-    }
+    p = fftw_plan_dft_3d(_nr0, _nr1, _nr2, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_execute(p);
 
-    cudaMemcpy(&d_aux[0], &h_aux[0], memsize, cudaMemcpyHostToDevice);
-
-    if (cufftPlan3d(&plan, _nr0, _nr1, _nr2, CUFFT_Z2Z) != CUFFT_SUCCESS)
-    {
-      fprintf(stderr, "CUFFT error: Plan creation failed\n");
-      return;
-    }
-
-    if (cufftExecZ2Z(plan, &d_aux[0], &d_aux[0], CUFFT_FORWARD) != CUFFT_SUCCESS)
-    {
-      fprintf(stderr, "CUFFT error: ExecZ2Z failed\n");
-      return;
-    }
-
-    if (cudaDeviceSynchronize() != cudaSuccess)
-    {
-      fprintf(stderr, "Cuda error: Failed to synchronize\n");
-      return;
-    }
-    
-    cudaMemcpy(&h_aux[0], &d_aux[0], memsize, cudaMemcpyDeviceToHost);
-
-    int lll = 0;
-    for (int k = 0; k < _nr2; k++)
+    for (int i = 0; i < _nr0; i++)
     {
       for (int j = 0; j < _nr1; j++)
       {
-	for (int i = 0; i < _nr0; i++)
+	for (int kk = 0; kk < _nr2; kk++)
 	{
 	  // Factor of 2 for spin degeneracy. 1/_vol comes from def of plane waves
-	  _rhoout(i,j,k) += 2*_wk[k]*std::abs(pow(h_aux[i + j*_nr0 + k*_nr0*_nr1].x, 2) + 
-					      pow(h_aux[i + j*_nr0 + k*_nr0*_nr1].y, 2))/_vol;
-	  
-	  printf("rhoout = %12.8f\n", _rhoout(i,j,k));
-	  lll += 1;
+	  _rhoout(i,j,kk) += 2*_wk[k]*(out[i + j*_nr0 + kk*_nr0*_nr1][0]*
+				       out[i + j*_nr0 + kk*_nr0*_nr1][0] +
+				       out[i + j*_nr0 + kk*_nr0*_nr1][1]*
+				       out[i + j*_nr0 + kk*_nr0*_nr1][1])/_vol;
 	}
       }
     }
-    cudaFree(d_aux);
   }
-
-  cufftDestroy(plan);
-
+  fftw_destroy_plan(p);
+  fftw_free(in);
+  fftw_free(out);
 }
 
 

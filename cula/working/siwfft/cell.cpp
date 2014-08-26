@@ -6,7 +6,6 @@
 #include <string>
 #include <sstream>
 #include <map>
-#include <complex>
 #include <sys/time.h>
 
 #include <Eigen/Dense>
@@ -110,7 +109,8 @@ void cell::_get_plane_waves()
 	{
 	  _G(0, ng) = pw(0); _G(1,ng) = pw(1); _G(2,ng) = pw(2);
 	  _G2[ng] = G_G;
-	  _mill.col(ng) << i, j, k;
+	  // _mill.col(ng) << i, j, k;
+	  _mill(0,ng) = i; _mill(1,ng) = j; _mill(2,ng) = k;
 	  ng++;
 	}
       }
@@ -369,14 +369,13 @@ double cell::_diagH(int k)
 
 void cell::_sumCharge(int k)
 {
+  int npw = _npw_perk[k];
   int memsize = sizeof(cufftDoubleComplex)*_nr0*_nr1*_nr2;
+
   cufftDoubleComplex *h_aux = (cufftDoubleComplex*)malloc(memsize);
   cufftDoubleComplex *d_aux;
   cufftHandle plan;
   cufftType CUFFT_C2C;
-  int nrank = 3;
-
-  int npw = _npw_perk[k];
 
   for (int nb = 0; nb < _nbands; nb++)
   {
@@ -386,18 +385,18 @@ void cell::_sumCharge(int k)
       h_aux[l].y = 0.;
     }
     
-    for (int n0 = 0; n0 < _nr0; n0++)
+    for (int n2 = 0; n2 < _nr2; n2++)
     {
       for (int n1 = 0; n1 < _nr1; n1++)
       {
-	for (int n2 = 0; n2 < _nr2; n2++)
+	for (int n0 = 0; n0 < _nr0; n0++)
 	{
 	  for (int i = 0; i < npw; i++)
 	  {
 	    int ik = _igk(i, k);
 	    int m0 = _mill(0, ik);
 	    if (m0 < 0)
-	      m0 += _nr1;
+	      m0 += _nr0;
 	    int m1 = _mill(1, ik);
 	    if (m1 < 0)
 	      m1 += _nr1;
@@ -410,14 +409,8 @@ void cell::_sumCharge(int k)
 	    // with negative values refolded so they lie
 	    // in the "far side of the cell" in G space
 
-	    // std::cout << "m0: " << m0 << " m1: " << m1 << " m2: " << m2 << std::endl;
-	    cufftDoubleComplex value;
-	    value.x = _eigvecs[i + _nbands*nb];
-	    value.y = 0.;
-	    h_aux[m0 + m1*_nr1 + m2*_nr1*_nr2].x = value.x;
-	    h_aux[m0 + m1*_nr1 + m2*_nr1*_nr2].y = value.y;
-	    // d_aux[m0][m1][m2] = _eigvecs[i*_nbands + nb];
-
+	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].x = _eigvecs[i + npw*nb];
+	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].y = 0;
 	  }
 	}
       }
@@ -453,18 +446,17 @@ void cell::_sumCharge(int k)
     cudaMemcpy(&h_aux[0], &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
     int lll = 0;
-    for (int k = 0; k < _nr2; k++)
+    for (int i = 0; i < _nr0; i++)
     {
       for (int j = 0; j < _nr1; j++)
       {
-	for (int i = 0; i < _nr0; i++)
+	for (int kk = 0; kk < _nr2; kk++)
 	{
 	  // Factor of 2 for spin degeneracy. 1/_vol comes from def of plane waves
-	  _rhoout(i,j,k) += 2*_wk[k]*std::abs(pow(h_aux[i + j*_nr0 + k*_nr0*_nr1].x, 2) + 
-					      pow(h_aux[i + j*_nr0 + k*_nr0*_nr1].y, 2))/_vol;
-	  
-	  printf("rhoout = %12.8f\n", _rhoout(i,j,k));
-	  lll += 1;
+	  _rhoout(i,j,kk) += (double)2*_wk[k]*(h_aux[i + j*_nr0 + kk*_nr0*_nr1].x*
+					       h_aux[i + j*_nr0 + kk*_nr0*_nr1].x + 
+					       h_aux[i + j*_nr0 + kk*_nr0*_nr1].y*
+					       h_aux[i + j*_nr0 + kk*_nr0*_nr1].y )/_vol;
 	}
       }
     }
@@ -481,9 +473,9 @@ void cell::_scf(void)
   // Timing:
   struct timeval start, end;   double dt;   gettimeofday(&start, NULL);
 
-  _nbands = 1;
+  _nbands = 8;
   _nelec = 8;
-  _max_iter = 1;
+  _max_iter = 2;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
