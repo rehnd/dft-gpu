@@ -38,7 +38,7 @@ cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latcon
   /* Below: Components of $\tau$ vector. Note: for now, leaving out
      a_0 which should multiply each component. Really should change
      this later so that S(G) = 2*cos(G\cdot \tau) with correct units */
-  _tau0 = 0.125; _tau1 = 0.125; _tau2 = 0.125; 
+  _tau0 = _latconst*0.125; _tau1 = _latconst*0.125; _tau2 = _latconst*0.125; 
 
   // Define lattice vectors
   _a1 << 0.5*latconst, 0.5*latconst, 0;
@@ -152,12 +152,8 @@ void cell::_get_SG(void)
 {
   // Calculates the geometrical structure factors S(G)
   _SG.resize(_npw, 0);
-  for (int i = 0; i < _npw; i++) 
-  {
-    _SG[i] = 2.0*cos( 2*M_PI*(_G(0,i)*_tau0/std::abs(_b1(0)) + 
-			      _G(1,i)*_tau1/std::abs(_b1(0)) + 
-			      _G(2,i)*_tau2/std::abs(_b1(0)) )) / _vol ;
-  }
+  for (int i = 0; i < _npw; i++)
+    _SG[i] = 2.0*cos( _G(0,i)*_tau0 + _G(1,i)*_tau1 + _G(2,i)*_tau2 ) / _vol;
 }
 
 
@@ -204,8 +200,6 @@ void cell::_count_nk(void)
     }
   }
   char igkdesc[] = "igk";
-  // print_matrix(igkdesc, _npw, _nk, _igk.data(), 1);
-
 }
 
 
@@ -249,8 +243,6 @@ void cell::_fillH(int k)
       int n2 = _mill(1, ik) - _mill(1, jk);
       int n3 = _mill(2, ik) - _mill(2, jk);
 
-      // string str = miller(n1,n2,n3);
-      // int ng = _indg[str];
       int ng = _indg(n1, n2, n3);
       
       double vsg = _form_factor( _G2[ng] );
@@ -259,7 +251,6 @@ void cell::_fillH(int k)
 	_H[i*npw + j] = kg.squaredNorm() + vsg * _SG[ng] + _vg[ng];
       else
 	_H[i*npw + j] = vsg * _SG[ng] + _vg[ng];
-      // printf("kg.squaredNorm() = %12.6f\n", kg.squaredNorm());
     }
   }
 }
@@ -282,8 +273,6 @@ double cell::_diagH(int k)
       // 	culaH[i + npw*i] -= 10000;
     }
   }
-  char chb[] = "culaH before diag";
-  //print_matrix_transpose(chb, npw, npw, &culaH[0], 1);
 
   culaStatus status;
   char jobz = 'V';
@@ -316,16 +305,11 @@ double cell::_diagH(int k)
   {
     for (int j = 0; j < npw; j++)
     {
-      double val = (double) culaH[i*npw + j];// was _H[i + npw*j]
-      _eigvecs[j*_nbands + i] = val; // was _eigvecs[i + j*npw]
+      double val = (double) culaH[i*npw + j]; // eigenvectors are stored in col-major
+      _eigvecs[j*_nbands + i] = val; // Save eigenvectors in row order
       _eigvals[i] = w[i];
     }
   }
-
-  // char mtx[] = "Hamiltonian";
-  // print_matrix( mtx, npw, npw, &culaH[0]);
-  // char desc[] = "Eigenvectors";
-  // print_matrix( desc, npw, _nbands, &_eigvecs[0]);
 
   char evals[] = "Eigenvalues";
   print_matrix(evals, 1, _eigvals.size(), &_eigvals[0]);
@@ -345,8 +329,7 @@ void cell::_sumCharge(int k)
   cufftHandle plan;
   cufftType CUFFT_C2C;
 
-
-  for (int nb = 0; nb < _nbands; nb++)
+  for (int nb = 0; nb < _nbands; nb++) 
   {
     struct timeval start, end;   double dt;   gettimeofday(&start, NULL);
     for (int l = 0; l < _nr0*_nr1*_nr2; l++)
@@ -354,13 +337,14 @@ void cell::_sumCharge(int k)
       h_aux[l].x = 0.;
       h_aux[l].y = 0.;
     }
-    for (int n2 = 0; n2 < _nr2; n2++)
+
+    for (int n2 = 0; n2 < _nr2; n2++) 
     {
-      for (int n1 = 0; n1 < _nr1; n1++)
+      for (int n1 = 0; n1 < _nr1; n1++) 
       {
-	for (int n0 = 0; n0 < _nr0; n0++)
+	for (int n0 = 0; n0 < _nr0; n0++) 
 	{
-	  for (int i = 0; i < npw; i++)
+	  for (int i = 0; i < npw; i++) 
 	  {
 	    int ik = _igk(i, k);
 	    int m0 = _mill(0, ik);
@@ -378,9 +362,8 @@ void cell::_sumCharge(int k)
 	    // with negative values refolded so they lie
 	    // in the "far side of the cell" in G space
 
-	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].x = _eigvecs[i*_nbands + nb]; // was _eigvecs[i + npw*nb]
+	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].x = _eigvecs[i*_nbands + nb];
 	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].y = 0;
-	    // printf("aux(%i,%i,%i) = %g\n", m0+1, m1+1, m2+1, h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].x);
 	  }
 	}
       }
@@ -417,12 +400,9 @@ void cell::_sumCharge(int k)
 
     gettimeofday(&start, NULL);
 
-    for (int i = 0; i < _nr0; i++)
-    {
-      for (int j = 0; j < _nr1; j++)
-      {
-	for (int kk = 0; kk < _nr2; kk++)
-	{
+    for (int i = 0; i < _nr0; i++) {
+      for (int j = 0; j < _nr1; j++) {
+	for (int kk = 0; kk < _nr2; kk++) {
 	  // Factor of 2 for spin degeneracy. 1/_vol comes from def of plane waves
 	  _rhoout(i,j,kk) += (double)2*_wk[k]*std::abs(h_aux[i + j*_nr0 + kk*_nr0*_nr1].x*
 						       h_aux[i + j*_nr0 + kk*_nr0*_nr1].x + 
@@ -431,11 +411,6 @@ void cell::_sumCharge(int k)
 	}
       }
     }
-
-    // for (int kk = 0; kk < _nr2; kk++)
-    //   for (int j = 0; j < _nr1; j++)
-    // 	for (int i = 0; i < _nr0; i++)
-    // 	  printf("rhoout(%i,%i,%i) = %g\n", i,j,kk,_rhoout(i,j,kk));
 
     gettimeofday(&end, NULL);
     dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
@@ -456,12 +431,14 @@ double cell::_mix_charge(void)
 
   drho2 = sqrt(drho2 * _vol / (_nr0*_nr1*_nr2));
 
-  for (int i = 0; i < _nr0; i++)
-    for (int j = 0; j < _nr1; j++)
+  for (int i = 0; i < _nr0; i++) {
+    for (int j = 0; j < _nr1; j++) {
       for (int k = 0; k < _nr2; k++) {
 	_rhoin(i,j,k) = _alpha*_rhoin(i,j,k) + (1. - _alpha)*_rhoout(i,j,k);
-	// printf("rhoin(%i,%i,%i) = %g\n", i+1,j+1,k+1,_rhoin(i,j,k));
       }
+    }
+  }
+
   return drho2;
 }
 
@@ -479,18 +456,15 @@ void cell::_v_of_rho(void)
   // Compute Exchange-Correlation Potential in real space
   cufftDoubleComplex zero; zero.x = 0., zero.y = 0;
   _vr.Initialize(_nr0,_nr1,_nr2, zero);
-  for (int i = 0; i < _nr0; i++)
-    for (int j = 0; j < _nr1; j++)
+  for (int i = 0; i < _nr0; i++) {
+    for (int j = 0; j < _nr1; j++) {
       for (int k = 0; k < _nr2; k++) {
 	double onethird = 1./3.;
 	_vr(i,j,k).x = -_e2*pow(3.*_rhoin(i,j,k)/M_PI, onethird);
 	_vr(i,j,k).y = 0.;
       }
-
-  // for (int k = 0; k < _nr2; k++)
-  //   for (int j = 0; j < _nr1; j++)
-  //     for (int i = 0; i < _nr0; i++)
-  // 	printf("vr(%i,%i,%i) = %6.8f\n", i+1,j+1,k+1,_vr(i,j,k).x);
+    }
+  }
 
   // Take FFT of V(r) -> V(G)
   cudaMemcpy(&d_aux[0], &_vr.a[0], memsize, cudaMemcpyHostToDevice);
@@ -506,12 +480,14 @@ void cell::_v_of_rho(void)
   cudaMemcpy(&_vr.a[0], &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
   // Now need to divide by grid dimensions!
-  for (int i = 0; i < _nr0; i++)
-    for (int j = 0; j < _nr1; j++)
+  for (int i = 0; i < _nr0; i++) {
+    for (int j = 0; j < _nr1; j++) {
       for (int k = 0; k < _nr2; k++) {
 	_vr(i,j,k).x /= (_nr0*_nr1*_nr2);
 	_vr(i,j,k).y /= (_nr0*_nr1*_nr2);
       }
+    }
+  }
 
   // Now get _vg from _vr
   _vg.resize(_npw, 0.);
@@ -528,19 +504,20 @@ void cell::_v_of_rho(void)
       m2 += _nr2;
     
     _vg[i] = (double)_vr(m0,m1,m2).x;
-    // printf("_vg[%i] = %6.6f\n",i+1, _vg[i]);
   }
 
   // Need a new vector to store \rho(G) and a way to store the v(G) from v(r)
   std::vector<double> rhog(_npw, 0.);
   Array3D<cufftDoubleComplex> vg_(_nr0,_nr1,_nr2,zero);
   
-  for (int i = 0; i < _nr0; i++)
-    for (int j = 0; j < _nr1; j++)
+  for (int i = 0; i < _nr0; i++) {
+    for (int j = 0; j < _nr1; j++) {
       for (int k = 0; k < _nr2; k++) {
 	vg_(i,j,k).x = _rhoin(i,j,k);
 	vg_(i,j,k).y = 0.;
       }
+    }
+  }
 
   // To compute Hartree potential, have to bring \rho(G) to G-space
   cudaMemcpy(&d_aux[0], vg_.a, memsize, cudaMemcpyHostToDevice);
@@ -556,13 +533,14 @@ void cell::_v_of_rho(void)
   cudaMemcpy(vg_.a, &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
   // Now need to divide by grid dimensions!
-  for (int i = 0; i < _nr0; i++)
-    for (int j = 0; j < _nr1; j++)
+  for (int i = 0; i < _nr0; i++) {
+    for (int j = 0; j < _nr1; j++) {
       for (int k = 0; k < _nr2; k++) {
 	vg_(i,j,k).x /= (_nr0*_nr1*_nr2);
 	vg_(i,j,k).y /= (_nr0*_nr1*_nr2);
       }
-
+    }
+  }
 
   // Now get \rho(G) from vg_
   for (int i = 0; i < _npw; i++)
@@ -603,10 +581,6 @@ void cell::_scf(void)
   _threshold = 1.e-6; // Convergence threshold
 
   _rhoin.Initialize(_nr0, _nr1, _nr2, _nelec/_vol);
-  // for (int i = 0 ; i < _nr0; i++)
-  //   for (int j = 0; j < _nr1; j++)
-  //     for (int k = 0; k < _nr2; k++)
-  // 	printf("rhoin(%i,%i,%i) = %g\n", i,j,k,_rhoin(i,j,k));
 
   _vg.resize(_npw, 0.);
 
@@ -644,7 +618,7 @@ void cell::_scf(void)
 	for (int k = 0; k < _nr2; k++)
 	  charge += std::abs(_rhoout(i,j,k)) * _vol/(_nr0*_nr1*_nr2);
     
-    printf("Charge: %8.8f\n", charge);
+    // printf("Charge: %8.8f\n", charge);
 
     double drho2 = _mix_charge();
     if ( drho2 < _threshold)
