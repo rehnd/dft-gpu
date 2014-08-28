@@ -55,8 +55,8 @@ private:
   int _nk;                     // Number of k-points in Brillouin Zone
   vector<double> _wk;          // Weights of k points
   MatrixXd _k;                 // k-points in the Brillouin Zone
-  std::map<string, int> _indg; // Gives the index of a G vector from its Miller indices
-  // IndG _indg;
+  // std::map<string, int> _indg; // Gives the index of a G vector from its Miller indices
+  IndG _indg;
 
   double _eps;                 // Small quantity for calculation of vsg
   double _e2;                  // Conversion factor between Rydbergs and Hartrees

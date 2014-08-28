@@ -33,7 +33,7 @@ public:
   }
   int& operator() (int i, int j, int k)
   {
-    int index = i + _x + (j + _y)*_xl + (k + _z)*_xl*_yl;
+    int index = (i + _x)*_xl*_yl + (j + _y)*_yl + (k + _z);
     if (index < _size && index >= 0)
       return a[index];
     else
@@ -44,7 +44,7 @@ public:
   }
   const int& operator() (int i, int j, int k) const
   {
-    int index = i + _x + (j + _y)*_xl + (k + _z)*_xl*_yl;
+    int index = (i + _x)*_xl*_yl + (j + _y)*_yl + (k + _z);
     if (index < _size && index >= 0)
       return a[index];
     else

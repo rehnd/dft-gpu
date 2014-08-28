@@ -125,13 +125,13 @@ void cell::_get_plane_waves()
   _nm0 = _mill.rowwise().maxCoeff()(0);
   _nm1 = _mill.rowwise().maxCoeff()(1);
   _nm2 = _mill.rowwise().maxCoeff()(2);
-  // _indg.Initialize(_nm0, _nm1, _nm2);
+  _indg.Initialize(_nm0, _nm1, _nm2);
 
   for (int i = 0; i < _npw; i++)
   {
-    string str = miller( _mill(0,i), _mill(1,i), _mill(2,i) );
-    _indg[str] = i;
-    // _indg(_mill(0,i), _mill(1,i), _mill(2,i)) = i;
+    // string str = miller( _mill(0,i), _mill(1,i), _mill(2,i) );
+    // _indg[str] = i;
+    _indg(_mill(0,i), _mill(1,i), _mill(2,i)) = i;
   }
 
   // While we're here, set the Real-Space grid dimensions:
@@ -249,9 +249,9 @@ void cell::_fillH(int k)
       int n2 = _mill(1, ik) - _mill(1, jk);
       int n3 = _mill(2, ik) - _mill(2, jk);
 
-      string str = miller(n1,n2,n3);
-      int ng = _indg[str];
-      //int ng = _indg(n1, n2, n3);
+      // string str = miller(n1,n2,n3);
+      // int ng = _indg[str];
+      int ng = _indg(n1, n2, n3);
       
       double vsg = _form_factor( _G2[ng] );
 
@@ -598,7 +598,7 @@ void cell::_scf(void)
 
   _nbands = 4;
   _nelec = 8;
-  _max_iter = 20;
+  _max_iter = 4;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
@@ -666,5 +666,4 @@ void cell::_scf(void)
   gettimeofday(&end, NULL);
   dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
   printf("Time (sec) for _scf: %g\n", dt);
-
 }
