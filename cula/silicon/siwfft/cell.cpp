@@ -203,6 +203,9 @@ void cell::_count_nk(void)
       exit(1);
     }
   }
+  char igkdesc[] = "igk";
+  print_matrix(igkdesc, _npw, _nk, _igk.data(), 1);
+
 }
 
 
@@ -230,14 +233,15 @@ double cell::_form_factor(double G2)
 
 void cell::_fillH(int k)
 {
-  _H.resize(_npw_perk[k] * _npw_perk[k], 0.);
+  int npw = _npw_perk[k];
+  _H.resize(npw*npw, 0.);
 
-  for (int i = 0; i < _npw_perk[k]; i++)
+  for (int i = 0; i < npw; i++)
   {
     int ik = _igk(i, k); // May get more caching if switch i, k
     Vector3d kg = _k.col(k) + _G.col(ik);
 
-    for (int j = i; j < _npw_perk[k]; j++)
+    for (int j = i; j < npw; j++)
     {
       int jk = _igk(j, k);
 
@@ -252,10 +256,10 @@ void cell::_fillH(int k)
       double vsg = _form_factor( _G2[ng] );
 
       if (i == j)
-	_H[i + j*_npw_perk[k]] = kg.squaredNorm() + vsg * _SG[ng] + _vg[ng];
+	_H[i*npw + j] = kg.squaredNorm() + vsg * _SG[ng] + _vg[ng];
       else
-	_H[i + j*_npw_perk[k]] = vsg * _SG[ng] + _vg[ng];
-      // printf("H(%d,%d) = %g\n", i, j, _H[i+j*_npw_perk[k]]);
+	_H[i*npw + j] = vsg * _SG[ng] + _vg[ng];
+      printf("kg.squaredNorm() = %12.6f\n", kg.squaredNorm());
     }
   }
 }
@@ -267,21 +271,23 @@ double cell::_diagH(int k)
   culaDouble* culaH = NULL;
   culaH = (culaDouble*)malloc(npw*npw*sizeof(culaDouble));
 
-  // First need to convert H to culaDouble
+  // First convert H to culaDouble for dsyev call
   for (int i = 0; i < npw; i++)
   {
     for (int j = 0; j < npw; j++)
     {
-      culaDouble val = (culaDouble)_H[i + npw*j];
-      culaH[i + npw*j] = val;
-      if (j == i)
-      	culaH[i + npw*i] -= 10000;
+      culaDouble val = (culaDouble)_H[i*npw + j];
+      culaH[i*npw + j] = val;
+      // if (j == i)
+      // 	culaH[i + npw*i] -= 10000;
     }
   }
+  char chb[] = "culaH before diag";
+  print_matrix_transpose(chb, npw, npw, &culaH[0], 1);
 
   culaStatus status;
   char jobz = 'V';
-  char uplo = 'U';
+  char uplo = 'L'; // _H is upper triangular, but cula wants col order, so use 'L', not 'U'
   int N = npw;
   int lwork = -1;
   int lda = N;
@@ -300,8 +306,8 @@ double cell::_diagH(int k)
   gettimeofday(&end, NULL);
   dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
 
-  for (int i = 0; i < npw; i++)
-    w[i] += 10000;
+  // for (int i = 0; i < npw; i++)
+  //   w[i] += 10000;
 
   _eigvecs.resize(npw*_nbands);
   _eigvals.resize(_nbands);
@@ -310,11 +316,16 @@ double cell::_diagH(int k)
   {
     for (int j = 0; j < _nbands; j++)
     {
-      double val = (double) culaH[i + j*npw];
-      _eigvecs[i + j*npw] = val;
+      double val = (double) culaH[i*npw + j];// was _H[i + npw*j]
+      _eigvecs[i*_nbands + j] = val; // was _eigvecs[i + j*npw]
       _eigvals[j] = w[j];
     }
   }
+
+  char mtx[] = "Hamiltonian";
+  print_matrix( mtx, npw, npw, &culaH[0], 1);
+  char desc[] = "Eigenvectors";
+  print_matrix( desc, npw, _nbands, &_eigvecs[0], _nbands);
 
   printf("Eigenvalues:   ");
   for (int i = 0; i < _eigvals.size(); i++)
@@ -336,18 +347,20 @@ void cell::_sumCharge(int k)
   cufftHandle plan;
   cufftType CUFFT_C2C;
 
+
   for (int nb = 0; nb < _nbands; nb++)
   {
+    struct timeval start, end;   double dt;   gettimeofday(&start, NULL);
     for (int l = 0; l < _nr0*_nr1*_nr2; l++)
     {
       h_aux[l].x = 0.;
       h_aux[l].y = 0.;
     }
-    for (int n0 = 0; n0 < _nr0; n0++)
+    for (int n2 = 0; n2 < _nr2; n2++)
     {
       for (int n1 = 0; n1 < _nr1; n1++)
       {
-	for (int n2 = 0; n2 < _nr2; n2++)
+	for (int n0 = 0; n0 < _nr0; n0++)
 	{
 	  for (int i = 0; i < npw; i++)
 	  {
@@ -367,17 +380,23 @@ void cell::_sumCharge(int k)
 	    // with negative values refolded so they lie
 	    // in the "far side of the cell" in G space
 
-	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].x = _eigvecs[i + npw*nb];
+	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].x = _eigvecs[i*_nbands + nb]; // was _eigvecs[i + npw*nb]
 	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].y = 0;
+	    // printf("aux(%i,%i,%i) = %g\n", m0+1, m1+1, m2+1, h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].x);
 	  }
 	}
       }
     }
 
-    if (cudaGetLastError() != cudaSuccess)
-    {
-      fprintf(stderr, "Cuda error: Failed to allocate\n");
-      return;
+    // Timing:
+    gettimeofday(&end, NULL);
+    dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
+    printf("---------Time (sec) for first loop: %g\n", dt);
+
+    gettimeofday(&start, NULL);
+
+    if (cudaGetLastError() != cudaSuccess) {
+      fprintf(stderr, "Cuda error: Failed to allocate\n");  return;
     }
 
     cudaMemcpy(&d_aux[0], &h_aux[0], memsize, cudaMemcpyHostToDevice);
@@ -394,6 +413,12 @@ void cell::_sumCharge(int k)
     
     cudaMemcpy(&h_aux[0], &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
+    gettimeofday(&end, NULL);
+    dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
+    printf("---------Time (sec) GPU FFT (including memcpy's): %g\n", dt);
+
+    gettimeofday(&start, NULL);
+
     for (int i = 0; i < _nr0; i++)
     {
       for (int j = 0; j < _nr1; j++)
@@ -401,13 +426,22 @@ void cell::_sumCharge(int k)
 	for (int kk = 0; kk < _nr2; kk++)
 	{
 	  // Factor of 2 for spin degeneracy. 1/_vol comes from def of plane waves
-	  _rhoout(i,j,kk) += (double)2*_wk[k]*(h_aux[i + j*_nr0 + kk*_nr0*_nr1].x*
-					       h_aux[i + j*_nr0 + kk*_nr0*_nr1].x + 
-					       h_aux[i + j*_nr0 + kk*_nr0*_nr1].y*
-					       h_aux[i + j*_nr0 + kk*_nr0*_nr1].y )/_vol;
+	  _rhoout(i,j,kk) += (double)2*_wk[k]*std::abs(h_aux[i + j*_nr0 + kk*_nr0*_nr1].x*
+						       h_aux[i + j*_nr0 + kk*_nr0*_nr1].x + 
+						       h_aux[i + j*_nr0 + kk*_nr0*_nr1].y*
+						       h_aux[i + j*_nr0 + kk*_nr0*_nr1].y )/_vol;
 	}
       }
     }
+
+    // for (int kk = 0; kk < _nr2; kk++)
+    //   for (int j = 0; j < _nr1; j++)
+    // 	for (int i = 0; i < _nr0; i++)
+    // 	  printf("rhoout(%i,%i,%i) = %g\n", i,j,kk,_rhoout(i,j,kk));
+
+    gettimeofday(&end, NULL);
+    dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
+    printf("---------Time (sec) for last loop: %g\n", dt);
   }
   cudaFree(d_aux);
   cufftDestroy(plan);
@@ -426,9 +460,10 @@ double cell::_mix_charge(void)
 
   for (int i = 0; i < _nr0; i++)
     for (int j = 0; j < _nr1; j++)
-      for (int k = 0; k < _nr2; k++)
+      for (int k = 0; k < _nr2; k++) {
 	_rhoin(i,j,k) = _alpha*_rhoin(i,j,k) + (1. - _alpha)*_rhoout(i,j,k);
-
+	// printf("rhoin(%i,%i,%i) = %g\n", i+1,j+1,k+1,_rhoin(i,j,k));
+      }
   return drho2;
 }
 
@@ -457,7 +492,7 @@ void cell::_v_of_rho(void)
   // for (int k = 0; k < _nr2; k++)
   //   for (int j = 0; j < _nr1; j++)
   //     for (int i = 0; i < _nr0; i++)
-  // 	printf("vr = %6.6f\n", _vr(i,j,k).x);
+  // 	printf("vr(%i,%i,%i) = %6.8f\n", i+1,j+1,k+1,_vr(i,j,k).x);
 
   // Take FFT of V(r) -> V(G)
   cudaMemcpy(&d_aux[0], _vr.a, memsize, cudaMemcpyHostToDevice);
@@ -548,11 +583,16 @@ void cell::_scf(void)
 
   _nbands = 4;
   _nelec = 8;
-  _max_iter = 2;
+  _max_iter = 1;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
   _rhoin.Initialize(_nr0, _nr1, _nr2, _nelec/_vol);
+  // for (int i = 0 ; i < _nr0; i++)
+  //   for (int j = 0; j < _nr1; j++)
+  //     for (int k = 0; k < _nr2; k++)
+  // 	printf("rhoin(%i,%i,%i) = %g\n", i,j,k,_rhoin(i,j,k));
+
   _vg.resize(_npw, 0.);
 
   for (int iter = 0; iter < _max_iter; iter++)

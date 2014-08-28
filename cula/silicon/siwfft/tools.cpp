@@ -14,7 +14,19 @@ void print_matrix( char* desc, int m, int n, double* a, int lda )
   printf("\n%s: \n", desc);
   for( i = 0; i < m; i++ )
   {
-    for( j = 0; j < n; j++ ) printf( " %6.2f", a[i+j*lda] );
+    for( j = 0; j < n; j++ ) printf( "%10.6f", (double)a[i*m + j] );
+    printf( "\n" );
+  }
+}
+
+
+void print_matrix_transpose( char* desc, int m, int n, double* a, int lda )
+{
+  int i, j;
+  printf("\n%s: \n", desc);
+  for( i = 0; i < m; i++ )
+  {
+    for( j = 0; j < n; j++ ) printf( "%10.6f", a[i + j*n] );
     printf( "\n" );
   }
 }

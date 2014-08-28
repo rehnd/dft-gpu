@@ -36,7 +36,7 @@ private:
 
   MatrixXd _G;                 // G vectors (plane waves)
   std::vector<double> _G2;     // G^2 values
-  MatrixXd _mill;              // Miller Indices of G vectors
+  MatrixXi _mill;              // Miller Indices of G vectors
   std::vector<double> _SG;     // Geometrical structure factor S(G)
 
   MatrixXd _igk;               // Index of G vector in list of k+G such that (k+G)^2 < Ecut
