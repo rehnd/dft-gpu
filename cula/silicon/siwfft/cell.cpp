@@ -42,14 +42,14 @@ cell::cell(double ecut, double latconst, int nk) : _ecut(ecut), _latconst(latcon
 
   // Define lattice vectors
   _a1 << 0.5*latconst, 0.5*latconst, 0;
-  _a2 << 0, 0.5*latconst, 0.5*latconst;
-  _a3 << 0.5*latconst, 0, 0.5*latconst;
+  _a2 << 0.5*latconst, 0, 0.5*latconst;
+  _a3 << 0, 0.5*latconst, 0.5*latconst;
 
   // Compute reciprocal lattice vectors
   _vol = std::abs(_a1.dot(_a2.cross(_a3))); // _vol < 0 -> use abs()
-  _b1 = (2*M_PI/_vol)*_a2.cross(_a3);
-  _b2 = (2*M_PI/_vol)*_a3.cross(_a1);
-  _b3 = (2*M_PI/_vol)*_a1.cross(_a2);
+  _b1 = -(2*M_PI/_vol)*_a2.cross(_a3);
+  _b2 = -(2*M_PI/_vol)*_a3.cross(_a1);
+  _b3 = -(2*M_PI/_vol)*_a1.cross(_a2);
 
   // k point used is a mean-value point
   _k(0,0) = 2*M_PI*0.6223/_latconst; 
@@ -204,7 +204,7 @@ void cell::_count_nk(void)
     }
   }
   char igkdesc[] = "igk";
-  print_matrix(igkdesc, _npw, _nk, _igk.data(), 1);
+  // print_matrix(igkdesc, _npw, _nk, _igk.data(), 1);
 
 }
 
@@ -259,7 +259,7 @@ void cell::_fillH(int k)
 	_H[i*npw + j] = kg.squaredNorm() + vsg * _SG[ng] + _vg[ng];
       else
 	_H[i*npw + j] = vsg * _SG[ng] + _vg[ng];
-      printf("kg.squaredNorm() = %12.6f\n", kg.squaredNorm());
+      // printf("kg.squaredNorm() = %12.6f\n", kg.squaredNorm());
     }
   }
 }
@@ -283,7 +283,7 @@ double cell::_diagH(int k)
     }
   }
   char chb[] = "culaH before diag";
-  print_matrix_transpose(chb, npw, npw, &culaH[0], 1);
+  //print_matrix_transpose(chb, npw, npw, &culaH[0], 1);
 
   culaStatus status;
   char jobz = 'V';
@@ -309,28 +309,26 @@ double cell::_diagH(int k)
   // for (int i = 0; i < npw; i++)
   //   w[i] += 10000;
 
-  _eigvecs.resize(npw*_nbands);
+  _eigvecs.resize(npw*_nbands,0);
   _eigvals.resize(_nbands);
 
-  for (int i = 0; i < npw; i++)
+  for (int i = 0; i < _nbands; i++)
   {
-    for (int j = 0; j < _nbands; j++)
+    for (int j = 0; j < npw; j++)
     {
       double val = (double) culaH[i*npw + j];// was _H[i + npw*j]
-      _eigvecs[i*_nbands + j] = val; // was _eigvecs[i + j*npw]
-      _eigvals[j] = w[j];
+      _eigvecs[j*_nbands + i] = val; // was _eigvecs[i + j*npw]
+      _eigvals[i] = w[i];
     }
   }
 
-  char mtx[] = "Hamiltonian";
-  print_matrix( mtx, npw, npw, &culaH[0], 1);
-  char desc[] = "Eigenvectors";
-  print_matrix( desc, npw, _nbands, &_eigvecs[0], _nbands);
+  // char mtx[] = "Hamiltonian";
+  // print_matrix( mtx, npw, npw, &culaH[0]);
+  // char desc[] = "Eigenvectors";
+  // print_matrix( desc, npw, _nbands, &_eigvecs[0]);
 
-  printf("Eigenvalues:   ");
-  for (int i = 0; i < _eigvals.size(); i++)
-    printf("%g  ", _eigvals[i]);
-  printf("\n");
+  char evals[] = "Eigenvalues";
+  print_matrix(evals, 1, _eigvals.size(), &_eigvals[0]);
 
   return dt;
 }
@@ -583,7 +581,7 @@ void cell::_scf(void)
 
   _nbands = 4;
   _nelec = 8;
-  _max_iter = 1;
+  _max_iter = 2;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
