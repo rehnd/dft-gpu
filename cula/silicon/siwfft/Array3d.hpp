@@ -35,7 +35,7 @@ public:
   }
   T& operator() (int i, int j, int k)
   {
-    int index = i + j*_x + k*_x*_y;
+    int index = i*_x*_y + j*_y + k;
     if (index < _size && index >= 0)
       return a[index];
     else
@@ -46,7 +46,7 @@ public:
   }
   const T& operator() (int i, int j, int k) const
   {
-    int index = i + j*_x + k*_x*_y;
+    int index = i*_x*_y + j*_y + k;
     if (index < _size && index >= 0)
       return a[index];
     else

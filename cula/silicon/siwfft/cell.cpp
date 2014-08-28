@@ -484,7 +484,7 @@ void cell::_v_of_rho(void)
       for (int k = 0; k < _nr2; k++) {
 	double onethird = 1./3.;
 	_vr(i,j,k).x = -_e2*pow(3.*_rhoin(i,j,k)/M_PI, onethird);
-	// _vr(i,j,k).y = 0.;
+	_vr(i,j,k).y = 0.;
       }
 
   // for (int k = 0; k < _nr2; k++)
@@ -493,7 +493,7 @@ void cell::_v_of_rho(void)
   // 	printf("vr(%i,%i,%i) = %6.8f\n", i+1,j+1,k+1,_vr(i,j,k).x);
 
   // Take FFT of V(r) -> V(G)
-  cudaMemcpy(&d_aux[0], _vr.a, memsize, cudaMemcpyHostToDevice);
+  cudaMemcpy(&d_aux[0], &_vr.a[0], memsize, cudaMemcpyHostToDevice);
   if (cufftPlan3d(&plan, _nr0, _nr1, _nr2, CUFFT_Z2Z) != CUFFT_SUCCESS) {
     fprintf(stderr, "CUFFT error: Plan creation failed\n"); return;
   }
@@ -503,7 +503,15 @@ void cell::_v_of_rho(void)
   if (cudaDeviceSynchronize() != cudaSuccess) {
     fprintf(stderr, "Cuda error: Failed to synchronize\n");  return;
   }
-  cudaMemcpy(_vr.a, &d_aux[0], memsize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(&_vr.a[0], &d_aux[0], memsize, cudaMemcpyDeviceToHost);
+
+  // Now need to divide by grid dimensions!
+  for (int i = 0; i < _nr0; i++)
+    for (int j = 0; j < _nr1; j++)
+      for (int k = 0; k < _nr2; k++) {
+	_vr(i,j,k).x /= (_nr0*_nr1*_nr2);
+	_vr(i,j,k).y /= (_nr0*_nr1*_nr2);
+      }
 
   // Now get _vg from _vr
   _vg.resize(_npw, 0.);
@@ -520,7 +528,7 @@ void cell::_v_of_rho(void)
       m2 += _nr2;
     
     _vg[i] = (double)_vr(m0,m1,m2).x;
-    // printf("_vg[i] = %6.6f\n", _vg[i]);
+    // printf("_vg[%i] = %6.6f\n",i+1, _vg[i]);
   }
 
   // Need a new vector to store \rho(G) and a way to store the v(G) from v(r)
@@ -547,6 +555,15 @@ void cell::_v_of_rho(void)
   }
   cudaMemcpy(vg_.a, &d_aux[0], memsize, cudaMemcpyDeviceToHost);
 
+  // Now need to divide by grid dimensions!
+  for (int i = 0; i < _nr0; i++)
+    for (int j = 0; j < _nr1; j++)
+      for (int k = 0; k < _nr2; k++) {
+	vg_(i,j,k).x /= (_nr0*_nr1*_nr2);
+	vg_(i,j,k).y /= (_nr0*_nr1*_nr2);
+      }
+
+
   // Now get \rho(G) from vg_
   for (int i = 0; i < _npw; i++)
   {
@@ -563,11 +580,11 @@ void cell::_v_of_rho(void)
     rhog[i] = (double)vg_(m0,m1,m2).x;
   }
 
-  printf("Check: rho(G=0) ?= nelec/volume: %5.5f\n", rhog[0]*_vol);
+  printf("Check: rho(G=0) ?= nelec/volume: %5.5f  ?=  %5.5f\n", rhog[0]*_vol, _nelec/_vol);
   
   for (int i = 0; i < _npw; i++)
     if (_G2[i] > _eps)
-      _vg[i] += 4*M_PI*rhog[i] / _G2[i];
+      _vg[i] += 4*M_PI*_e2*rhog[i] / _G2[i];
 
   cudaFree(d_aux);
   cufftDestroy(plan);
@@ -581,7 +598,7 @@ void cell::_scf(void)
 
   _nbands = 4;
   _nelec = 8;
-  _max_iter = 2;
+  _max_iter = 20;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
