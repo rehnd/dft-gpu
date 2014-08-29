@@ -518,7 +518,7 @@ void cell::_scf(void)
 
   _nbands = 4;
   _nelec = 8;
-  _max_iter = 4;
+  _max_iter = 3;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
