@@ -269,8 +269,8 @@ double cell::_diagH(int k)
     {
       culaDouble val = (culaDouble)_H[i*npw + j];
       culaH[i*npw + j] = val;
-      // if (j == i)
-      // 	culaH[i + npw*i] -= 10000;
+      if (j == i)
+      	culaH[i + npw*i] -= 10000;
     }
   }
 
@@ -295,8 +295,8 @@ double cell::_diagH(int k)
   gettimeofday(&end, NULL);
   dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
 
-  // for (int i = 0; i < npw; i++)
-  //   w[i] += 10000;
+  for (int i = 0; i < npw; i++)
+    w[i] += 10000;
 
   _eigvecs.resize(npw*_nbands,0);
   _eigvals.resize(_nbands);
@@ -312,7 +312,7 @@ double cell::_diagH(int k)
   }
 
   char evals[] = "Eigenvalues";
-  print_matrix(evals, 1, _eigvals.size(), &_eigvals[0]);
+  // print_matrix(evals, 1, _eigvals.size(), &_eigvals[0]);
 
   return dt;
 }
@@ -329,6 +329,8 @@ void cell::_sumCharge(int k)
   cufftHandle plan;
   cufftType CUFFT_C2C;
 
+  printf("In sum charge:\n");
+
   for (int nb = 0; nb < _nbands; nb++) 
   {
     struct timeval start, end;   double dt;   gettimeofday(&start, NULL);
@@ -338,11 +340,11 @@ void cell::_sumCharge(int k)
       h_aux[l].y = 0.;
     }
 
-    for (int n2 = 0; n2 < _nr2; n2++) 
+    for (int n0 = 0; n0 < _nr0; n0++) 
     {
       for (int n1 = 0; n1 < _nr1; n1++) 
       {
-	for (int n0 = 0; n0 < _nr0; n0++) 
+	for (int n2 = 0; n2 < _nr2; n2++) 
 	{
 	  for (int i = 0; i < npw; i++) 
 	  {
@@ -362,8 +364,8 @@ void cell::_sumCharge(int k)
 	    // with negative values refolded so they lie
 	    // in the "far side of the cell" in G space
 
-	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].x = _eigvecs[i*_nbands + nb];
-	    h_aux[m0 + m1*_nr0 + m2*_nr0*_nr1].y = 0;
+	    h_aux[m0*_nr0*_nr1 + m1*_nr1 + m2].x = _eigvecs[i*_nbands + nb];
+	    h_aux[m0*_nr0*_nr1 + m1*_nr1 + m2].y = 0;
 	  }
 	}
       }
@@ -372,7 +374,7 @@ void cell::_sumCharge(int k)
     // Timing:
     gettimeofday(&end, NULL);
     dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-    printf("---------Time (sec) for first loop: %g\n", dt);
+    printf("\t\tTime (sec) to rearrange indices: %g\n", dt);
 
     gettimeofday(&start, NULL);
 
@@ -396,7 +398,7 @@ void cell::_sumCharge(int k)
 
     gettimeofday(&end, NULL);
     dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-    printf("---------Time (sec) GPU FFT (including memcpy's): %g\n", dt);
+    printf("\t\tTime (sec) GPU FFT: %g\n", dt);
 
     gettimeofday(&start, NULL);
 
@@ -404,17 +406,17 @@ void cell::_sumCharge(int k)
       for (int j = 0; j < _nr1; j++) {
 	for (int kk = 0; kk < _nr2; kk++) {
 	  // Factor of 2 for spin degeneracy. 1/_vol comes from def of plane waves
-	  _rhoout(i,j,kk) += (double)2*_wk[k]*std::abs(h_aux[i + j*_nr0 + kk*_nr0*_nr1].x*
-						       h_aux[i + j*_nr0 + kk*_nr0*_nr1].x + 
-						       h_aux[i + j*_nr0 + kk*_nr0*_nr1].y*
-						       h_aux[i + j*_nr0 + kk*_nr0*_nr1].y )/_vol;
+	  _rhoout(i,j,kk) += (double)2*_wk[k]*std::abs(h_aux[i*_nr0*_nr1 + j*_nr1 + kk].x*
+						       h_aux[i*_nr0*_nr1 + j*_nr1 + kk].x + 
+						       h_aux[i*_nr0*_nr1 + j*_nr1 + kk].y*
+						       h_aux[i*_nr0*_nr1 + j*_nr1 + kk].y )/_vol;
 	}
       }
     }
 
     gettimeofday(&end, NULL);
     dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-    printf("---------Time (sec) for last loop: %g\n", dt);
+    // printf("\t\tTime (sec) for last loop: %g\n", dt);
   }
   cudaFree(d_aux);
   cufftDestroy(plan);
@@ -558,7 +560,7 @@ void cell::_v_of_rho(void)
     rhog[i] = (double)vg_(m0,m1,m2).x;
   }
 
-  printf("Check: rho(G=0) ?= nelec/volume: %5.5f  ?=  %5.5f\n", rhog[0]*_vol, _nelec/_vol);
+  // printf("Check: rho(G=0) ?= nelec/volume: %5.5f  ?=  %5.5f\n", rhog[0]*_vol, _nelec/_vol);
   
   for (int i = 0; i < _npw; i++)
     if (_G2[i] > _eps)
@@ -576,7 +578,7 @@ void cell::_scf(void)
 
   _nbands = 4;
   _nelec = 8;
-  _max_iter = 4;
+  _max_iter = 3;
   _alpha = 0.5; // Charge mixing parameter
   _threshold = 1.e-6; // Convergence threshold
 
@@ -586,6 +588,7 @@ void cell::_scf(void)
 
   for (int iter = 0; iter < _max_iter; iter++)
   {
+    printf("Iteration #%i\n", iter+1);
     _rhoout.Initialize(_nr0, _nr1, _nr2, 0.);
 
     for (int k = 0; k < _nk; k++)
@@ -594,20 +597,20 @@ void cell::_scf(void)
       _fillH(k);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      printf("Time (sec) for _fillH: %g\n", dt1);
+      printf("\tTime (sec) for _fillH: %g\n", dt1);
 
       gettimeofday(&start1, NULL);
       double dt = _diagH(k);
-      // printf("Iteration %d, Diagonalization time = %g sec      ", iter, dt);
+      // printf("\tIteration %d, Diagonalization time = %g sec      ", iter, dt);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      printf("Time (sec) for _diagH: %g\n", dt1);
+      printf("\tTime (sec) for _diagH: %g\n", dt1);
 
       gettimeofday(&start1, NULL);
       _sumCharge(k);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      printf("Time (sec) for _sumCharge: %g\n", dt1);
+      printf("\tTime (sec) for _sumCharge: %g\n", dt1);
     }
 
     struct timeval start1, end1; double dt1; gettimeofday(&start1, NULL);
@@ -626,18 +629,18 @@ void cell::_scf(void)
       printf("Convergence threshold %g reached\n", _threshold);
       break;
     }
-    else 
-      printf("Delta rho = %10.3e\n", drho2);
+    // else 
+      // printf("\tDelta rho = %10.3e\n", drho2);
    
     _v_of_rho();
  
     gettimeofday(&end1, NULL);
     dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-    printf("Time (sec) for all charge mixing stuff: %g\n", dt1);
+    printf("\tTime (sec) for all charge mixing stuff: %g\n", dt1);
   }
 
   // Timing:
   gettimeofday(&end, NULL);
   dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-  printf("Time (sec) for _scf: %g\n", dt);
+  printf("Total Run time for (sec) for _scf: %g\n", dt);
 }

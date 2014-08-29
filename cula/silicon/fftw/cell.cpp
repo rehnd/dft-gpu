@@ -313,7 +313,7 @@ double cell::_diagH(int k)
   }
 
   char evals[] = "Eigenvalues";
-  print_matrix(evals, 1, _eigvals.size(), &_eigvals[0]);
+  // print_matrix(evals, 1, _eigvals.size(), &_eigvals[0]);
 
   return dt;
 }
@@ -370,7 +370,7 @@ void cell::_sumCharge(int k)
     // Timing:
     gettimeofday(&end, NULL);
     dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-    printf("---------Time (sec) for first loop: %g\n", dt);
+    printf("\t\tTime (sec) to rearrange indices: %g\n", dt);
 
     gettimeofday(&start, NULL);
 
@@ -379,7 +379,7 @@ void cell::_sumCharge(int k)
 
     gettimeofday(&end, NULL);
     dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-    printf("---------Time (sec) GPU FFT (including memcpy's): %g\n", dt);
+    printf("\t\tTime (sec) FFTW: %g\n", dt);
 
     gettimeofday(&start, NULL);
 
@@ -397,7 +397,7 @@ void cell::_sumCharge(int k)
 
     gettimeofday(&end, NULL);
     dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-    printf("---------Time (sec) for last loop: %g\n", dt);
+    // printf("---------Time (sec) for last loop: %g\n", dt);
   }
   fftw_destroy_plan(p);
   fftw_free(in);
@@ -559,20 +559,20 @@ void cell::_scf(void)
       _fillH(k);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      printf("Time (sec) for _fillH: %g\n", dt1);
+      printf("\tTime (sec) for _fillH: %g\n", dt1);
 
       gettimeofday(&start1, NULL);
       double dt = _diagH(k);
       // printf("Iteration %d, Diagonalization time = %g sec      ", iter, dt);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      printf("Time (sec) for _diagH: %g\n", dt1);
+      printf("\tTime (sec) for _diagH: %g\n", dt1);
 
       gettimeofday(&start1, NULL);
       _sumCharge(k);
       gettimeofday(&end1, NULL);
       dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-      printf("Time (sec) for _sumCharge: %g\n", dt1);
+      printf("\tTime (sec) for _sumCharge: %g\n", dt1);
     }
 
     struct timeval start1, end1; double dt1; gettimeofday(&start1, NULL);
@@ -591,18 +591,18 @@ void cell::_scf(void)
       printf("Convergence threshold %g reached\n", _threshold);
       break;
     }
-    else 
-      printf("Delta rho = %10.3e\n", drho2);
+    // else 
+    //   printf("Delta rho = %10.3e\n", drho2);
    
     _v_of_rho();
  
     gettimeofday(&end1, NULL);
     dt1 = ((end1.tv_sec  - start1.tv_sec) * 1000000u + end1.tv_usec - start1.tv_usec) / 1.e6;
-    printf("Time (sec) for all charge mixing stuff: %g\n", dt1);
+    printf("\tTime (sec) for all charge mixing stuff: %g\n", dt1);
   }
 
   // Timing:
   gettimeofday(&end, NULL);
   dt = ((end.tv_sec  - start.tv_sec) * 1000000u + end.tv_usec - start.tv_usec) / 1.e6;
-  printf("Time (sec) for _scf: %g\n", dt);
+  printf("Total run time (sec) for _scf: %g\n", dt);
 }
